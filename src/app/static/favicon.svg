@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- half-filled circle: the light/dark theme motif; fixed color so it
+       reads in both light and dark browser tabs -->
+  <circle
+    cx="16"
+    cy="16"
+    r="12"
+    fill="none"
+    stroke="#6366f1"
+    stroke-width="2.5"
+  />
+  <path d="M16 4a12 12 0 0 1 0 24Z" fill="#6366f1" />
+</svg>

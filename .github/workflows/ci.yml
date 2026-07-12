@@ -1,0 +1,105 @@
+# Runs on every push: lint (ruff + codespell + prettier + eslint) and the
+# pytest suite (API tests + Playwright E2E against a live uvicorn server).
+#
+# Everything installs at locked versions - python packages from uv.lock, npm
+# tools from package-lock.json - the same single sources of truth the
+# devcontainer images bake in. Actions are pinned to commit SHAs because tags
+# are movable; Dependabot keeps the SHAs, lockfiles and base images current
+# (see .github/dependabot.yml).
+name: CI
+
+# push covers work on branches in this repo; pull_request additionally covers
+# PRs from forks (which never trigger push events here). Limiting push to main
+# avoids double runs on same-repo PR branches.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# a newer push to the same branch supersedes any run still in flight
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# CI only reads the repo - grant the workflow token the minimum permissions
+permissions:
+  contents: read
+
+env:
+  # Without this, every `uv run` implicitly syncs the default (dev) dependency
+  # group first, silently undoing the lint job's `--only-group lint` install.
+  # The explicit `uv sync` steps are the only installs.
+  UV_NO_SYNC: "1"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # python-version-file: requires-python in pyproject.toml is the single
+      # source of truth for the Python line
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version-file: pyproject.toml
+      # enable-cache keys uv's cache on uv.lock
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: true
+      - name: Install lint tools
+        run: uv sync --locked --only-group lint
+      - name: Ruff lint
+        run: uv run ruff check .
+      - name: Ruff format check
+        run: uv run ruff format --check .
+      # skip list comes from [tool.codespell] in pyproject.toml
+      - name: Codespell
+        run: uv run codespell .
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "26"
+          cache: npm
+      # exact tool versions from package-lock.json
+      - name: Install npm tools
+        run: npm ci
+      # prettier@3 respects .gitignore, so caches/node_modules are excluded
+      - name: Prettier check
+        run: npx prettier --check .
+      - name: ESLint
+        run: npx eslint .
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version-file: pyproject.toml
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: true
+      - name: Install Python deps
+        run: uv sync --locked
+      # mypy runs here (not in lint) because it needs the runtime deps importable
+      - name: Mypy
+        run: uv run mypy
+      # key the browser cache on the locked Playwright version so a
+      # Playwright upgrade can't be paired with a stale browser build
+      - name: Compute Playwright cache key
+        id: playwright-version
+        run: echo "version=$(uv run playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ steps.playwright-version.outputs.version }}
+      - name: Install headless Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: uv run playwright install chromium --with-deps
+      - name: Install Chromium system deps
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: uv run playwright install-deps chromium
+      - name: Run tests
+        run: uv run pytest

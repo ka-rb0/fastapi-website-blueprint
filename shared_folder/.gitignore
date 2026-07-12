@@ -1,0 +1,5 @@
+*
+!.gitignore
+!/data/
+/data/*
+!/data/test.txt

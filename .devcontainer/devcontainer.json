@@ -1,0 +1,20 @@
+{
+  "name": "FastAPI Website Blueprint",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "master",
+  "workspaceFolder": "/workspace",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python"
+      },
+      "extensions": [
+        "ms-python.python",
+        "ms-azuretools.vscode-docker",
+        "anthropic.claude-code"
+      ]
+    }
+  }
+  // No postCreateCommand: dependencies are baked into the image
+  // (see docker_files/) at the exact versions in uv.lock / package-lock.json.
+}

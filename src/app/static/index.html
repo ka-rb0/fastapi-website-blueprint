@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="A minimal, modern FastAPI website blueprint with light and dark themes."
+    />
+    <title>FastAPI Website Blueprint</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <!-- Tints browser chrome to match --bg (hex values mirrored by hand from
+         css/theme.css - tests/test_static_consistency.py enforces the match);
+         media-scoped, so it follows the OS scheme. An in-page theme override
+         doesn't retint the chrome - a deliberate simplicity tradeoff. -->
+    <meta
+      name="theme-color"
+      media="(prefers-color-scheme: light)"
+      content="#f5f5fa"
+    />
+    <meta
+      name="theme-color"
+      media="(prefers-color-scheme: dark)"
+      content="#15151d"
+    />
+    <link rel="stylesheet" href="css/theme.css" />
+    <link rel="stylesheet" href="css/style.css" />
+    <script>
+      // Re-apply a previously chosen theme before first paint to avoid a
+      // flash. Without one, data-theme stays unset and the CSS follows the
+      // OS scheme (see css/theme.css).
+      try {
+        // Validate - a stale or corrupt value must not disable the switch.
+        const saved = localStorage.getItem("theme");
+        if (saved === "light" || saved === "dark") {
+          document.documentElement.dataset.theme = saved;
+        }
+      } catch {
+        // Storage blocked - the CSS default (follow the OS) applies.
+      }
+    </script>
+  </head>
+  <body>
+    <header>
+      <!-- Inside <header> so landmark navigation reaches it; position: fixed
+           keeps it out of the flow. aria-pressed is owned by js/main.js:
+           hardcoding it here would be wrong whenever a saved choice exists.
+           Auto = follow the OS scheme. -->
+      <div class="theme-switch" role="group" aria-label="Color theme">
+        <button type="button" data-theme-choice="light">Light</button>
+        <button type="button" data-theme-choice="auto">Auto</button>
+        <button type="button" data-theme-choice="dark">Dark</button>
+      </div>
+      <h1>FASTAPI WEBSITE BLUEPRINT</h1>
+    </header>
+
+    <main>
+      <p class="tagline">A minimal starting point. Build from here.</p>
+
+      <!-- Example API round trip: js/main.js posts the text to /api/shout
+           (pydantic-validated) and renders the uppercased reply below. -->
+      <form class="shout" id="shout-form">
+        <input
+          id="shout-input"
+          name="text"
+          aria-label="Text to shout"
+          placeholder="Type something…"
+          autocomplete="off"
+          required
+        />
+        <button type="submit">Shout</button>
+        <output for="shout-input" id="shout-output"></output>
+      </form>
+    </main>
+
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>

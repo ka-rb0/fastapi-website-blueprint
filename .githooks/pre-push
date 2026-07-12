@@ -1,0 +1,46 @@
+#!/bin/sh
+# Blocks a push to main unless the same checks CI runs (see
+# .github/workflows/ci.yml) pass locally. Pushes to other branches are
+# not guarded - CI covers them via pull_request.
+#
+# Committed hooks are not active by default; activate once per clone with:
+#   git config core.hooksPath .githooks
+#
+# Emergency bypass (use sparingly): git push --no-verify
+
+# stdin: one line per ref being pushed: <local ref> <local sha> <remote ref> <remote sha>
+pushing_main=""
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  if [ "$remote_ref" = "refs/heads/main" ]; then
+    pushing_main=1
+  fi
+done
+[ -z "$pushing_main" ] && exit 0
+
+echo "pre-push: push targets main - running lint + tests (bypass: --no-verify)"
+
+fail() {
+  echo ""
+  echo "pre-push: '$1' failed - push to main aborted." >&2
+  exit 1
+}
+
+run() {
+  echo ""
+  echo "pre-push: $*"
+  "$@" || fail "$*"
+}
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+run uv run ruff check .
+run uv run ruff format --check .
+run uv run codespell .
+run npx prettier --check .
+run npx eslint .
+run uv run mypy
+run uv run pytest
+
+echo ""
+echo "pre-push: all checks passed - pushing to main."
+exit 0

@@ -1,0 +1,103 @@
+[project]
+# Not a distributable package - this table just records project metadata
+# (the Python version convention, machine-readable) for tools that read it.
+name = "fastapi-website-blueprint"
+version = "0.1.0"
+requires-python = "==3.14.*"
+license = "MIT"  # PEP 639 license expression
+license-files = ["LICENSE"]
+
+[dependency-groups]
+# Single source of truth for dependencies (PEP 735). Exact versions are pinned
+# in uv.lock (kept current by Dependabot); these are floors. Install with
+# `uv sync` (all dev tools) or `uv sync --only-group <name>`. The devcontainer
+# base images already ship the dev tools; the runtime group is what the app
+# itself needs.
+runtime = [
+  "pydantic>=2.13.4",
+  "fastapi>=0.139.0",
+  "uvicorn[standard]>=0.51.0",
+]
+lint = [
+  "codespell>=2.4.2",
+  "ruff>=0.15.21",
+]
+dev = [
+  { include-group = "runtime" },
+  { include-group = "lint" },
+  "mypy>=2.2.0",
+  "playwright>=1.61.0",
+  "pytest>=9.1.1",
+]
+
+[tool.codespell]
+# single source of truth for the skip list - run as plain `codespell .`
+# (lockfiles are machine-generated: hashes and package names trip the checker)
+skip = "./.git,./node_modules,./.venv,./.pytest_cache,./.ruff_cache,./.mypy_cache,./uv.lock,./package-lock.json"
+
+[tool.ruff]
+exclude = [".claude/"]
+# no target-version: ruff infers it from requires-python - one source of truth
+line-length = 88  # same as black
+
+[tool.ruff.lint]
+extend-select = [
+  "UP",    # pyupgrade
+  "I",     # isort
+  "E",     # Enforce PEP8 error codes (e.g., indentation, line breaks)
+  "F",     # Flake8 codes (undefined names, unused imports, etc.)
+  "B",     # Bugbear for finding more complex bugs
+  "D",     # Pydocstyle for docstring conventions
+  "N",     # Naming conventions (pep8-naming)
+  "W",     # PEP8 warnings (whitespace, deprecation)
+  "C",     # C4 (flake8-comprehensions) + C90 (McCabe cyclomatic complexity)
+  "A",     # https://docs.astral.sh/ruff/rules/#flake8-builtins-a
+  "YTT",   # flake8-2020: misuse of sys.version / sys.version_info
+  "ASYNC", # Async checks
+  "ICN",   # Import conventions
+  "LOG",   # Logging conventions
+  "G",     # Logging format
+  "PIE",   # https://docs.astral.sh/ruff/rules/#flake8-pie-pie
+  "S",     # Security checks (bandit rules)
+  "T20",   # don't allow print statements
+  #"PT",    # Pytest checks (consider enabling it soon)
+  #"EM",    # https://docs.astral.sh/ruff/rules/#flake8-errmsg-em
+  #"PL",    # Pylint rules (if you want even more strictness)
+  #"COM",   # https://docs.astral.sh/ruff/rules/#flake8-commas-com
+  #"ANN",   # Enforce type hints (annotations) # mypy covers type errors; ANN would additionally force annotations everywhere
+]
+ignore = [
+  "E501",   # line-too-long - `ruff format` handles line length where it can
+  "D100",   # missing docstring in public module
+  "D101",   # missing docstring in public class
+  "D102",   # missing docstring in public method
+  "D103",   # missing docstring in public function
+  "D104",   # missing docstring in public package
+  "D203",   # conflicts with D211
+  "D212",   # conflicts with D213 which is better
+  "D413",   # missing blank line after last section
+  "G004",   # Logging statement uses f-string
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S"]
+
+[tool.mypy]
+# run as plain `mypy` - needs the runtime deps (fastapi, playwright, pytest)
+# importable, so in CI it lives in the test job, not the lint job.
+# No python_version: mypy uses the running interpreter, which requires-python
+# pins to the same line - one source of truth.
+files = ["src", "tests"]
+mypy_path = "src"  # so `app.*` imports resolve without PYTHONPATH (CI)
+strict = true
+
+[[tool.mypy.overrides]]
+# be more lenient on tests so that test code stays cheap to write
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]  # so tests can import `app.*` without PYTHONPATH (CI)

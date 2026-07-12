@@ -1,0 +1,123 @@
+/* Minimal, theme-driven styling. The active theme is data-theme on <html>. */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  body {
+    transition:
+      background 0.25s,
+      color 0.25s;
+  }
+}
+
+/* --- theme switch ------------------------------------------------------- */
+
+.theme-switch {
+  /* fixed, not absolute: stays put when the page scrolls */
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.theme-switch button {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.9rem;
+  cursor: pointer;
+}
+
+.theme-switch button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.theme-switch button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* --- layout ------------------------------------------------------------- */
+
+header {
+  margin-top: 18vh;
+}
+
+h1 {
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: 0.35em;
+  margin: 0 0 2.5rem;
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2rem;
+}
+
+.tagline {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+/* --- shout example ------------------------------------------------------- */
+
+.shout {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.shout input {
+  font: inherit;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.5rem 1rem;
+}
+
+.shout button {
+  font: inherit;
+  color: var(--accent-fg);
+  background: var(--accent);
+  border: none;
+  border-radius: 999px;
+  padding: 0.5rem 1.1rem;
+  cursor: pointer;
+}
+
+.shout output {
+  /* own full-width line under the controls; reserve the line so the first
+     reply doesn't shift the layout */
+  flex-basis: 100%;
+  min-height: 1.5rem;
+  text-align: center;
+  font-weight: 600;
+}

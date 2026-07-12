@@ -1,0 +1,29 @@
+/* Design tokens for both themes, resolved by CSS light-dark().
+   color-scheme is the single switch: with no data-theme on <html> the page
+   follows the OS preference; an explicit data-theme (set by the theme switch)
+   forces one scheme. It also renders native UI (scrollbars, form controls)
+   in the matching scheme. */
+:root {
+  color-scheme: light dark;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+:root {
+  /* Two files mirror these hex values by hand because they can't read CSS
+     variables: the <meta name="theme-color"> tags in index.html (--bg) and
+     favicon.svg (--accent). Re-theming? Update those too -
+     tests/test_static_consistency.py fails until they match. */
+  /*                 light    dark  */
+  --bg: light-dark(#f5f5fa, #15151d);
+  --fg: light-dark(#1c1c28, #ececf4);
+  --muted: light-dark(#6b6b7b, #9a9aac);
+  --surface: light-dark(#ffffff, #1f1f2b);
+  --border: light-dark(#d9d9e3, #33334a);
+  --accent: light-dark(#6366f1, #818cf8);
+  --accent-fg: light-dark(#ffffff, #15151d);
+}

@@ -1,0 +1,38 @@
+services:
+  master:
+    build:
+      context: ./
+      dockerfile: Dockerfile.master
+    # A real PID 1 that reaps orphans - `sleep infinity` doesn't, and a
+    # devcontainer spawns many short-lived processes (VS Code server, test
+    # runs, agent CLIs).
+    init: true
+    # ${VAR:?} makes a missing .env fail fast with a clear message instead of
+    # a cryptic interpolation error - see .env.example for the expected values.
+    volumes:
+      - ..:/workspace
+      - ../shared_folder/data:${DATA_PATH:?set it in .devcontainer/.env, see .env.example}
+      - ${CLAUDE_HOME_HOST_PATH:?set it in .devcontainer/.env, see .env.example}:/root/.claude
+      # Anonymous volumes: keep these container-generated directories from
+      # syncing back to the host.
+      - /workspace/.pytest_cache
+      - /workspace/.ruff_cache
+      - /workspace/.mypy_cache
+      - /workspace/.venv
+      - /workspace/node_modules
+    environment:
+      # Don't write .pyc files (__pycache__ directories).
+      PYTHONDONTWRITEBYTECODE: 1
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATA_PATH: ${DATA_PATH}
+      WEBSITE_INTERNAL_PORT: ${WEBSITE_INTERNAL_PORT:?set it in .devcontainer/.env, see .env.example}
+      WEBSITE_TEST_PORT: ${WEBSITE_TEST_PORT:-20177}
+    ports:
+      - "${WEBSITE_EXTERNAL_PORT:?set it in .devcontainer/.env, see .env.example}:${WEBSITE_INTERNAL_PORT}"
+    networks:
+      - fastapi-website-blueprint-network
+    command: sleep infinity
+
+networks:
+  fastapi-website-blueprint-network:
+    driver: bridge

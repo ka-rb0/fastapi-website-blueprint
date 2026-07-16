@@ -16,6 +16,9 @@ dark themes.
   for real endpoints.
 - API tests plus Playwright E2E tests against a live uvicorn server.
 - Strict linting and type checking wired into CI.
+- Security by default: same-origin CSP and hardening headers on every
+  response, and security scanning in CI (pip-audit, npm audit, zizmor,
+  CodeQL, dependency review).
 
 ## URLs
 
@@ -60,12 +63,15 @@ mypy
 eslint .
 prettier --check .  # respects .gitignore
 codespell .  # skip list in [tool.codespell] in pyproject.toml
+zizmor .github/workflows/  # security lint of the CI workflows
 ```
 
 ## Extras
 
 - [For Humans](./docs_for_human/README.md)
 - [For Agents & AI Assistants](./AGENTS.md)
+- [Contributing](./CONTRIBUTING.md)
+- [Security policy](./SECURITY.md)
 
 ## License
 

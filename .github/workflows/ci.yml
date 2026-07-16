@@ -1,5 +1,7 @@
-# Runs on every push: lint (ruff + codespell + prettier + eslint) and the
-# pytest suite (API tests + Playwright E2E against a live uvicorn server).
+# Runs on every push: lint (ruff + codespell + prettier + eslint), security
+# audits (pip-audit + npm audit + zizmor, all free; PRs also get a dependency
+# review), and the pytest suite (API tests + Playwright E2E against a live
+# uvicorn server).
 #
 # Everything installs at locked versions - python packages from uv.lock, npm
 # tools from package-lock.json - the same single sources of truth the
@@ -37,6 +39,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # don't leave the workflow token in .git/config for later steps
+          persist-credentials: false
       # python-version-file: requires-python in pyproject.toml is the single
       # source of truth for the Python line
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -67,12 +72,55 @@ jobs:
         run: npx prettier --check .
       - name: ESLint
         run: npx eslint .
+      # ---- security audits -----------------------------------------------
+      # Dependabot keeps the pins current; these steps fail the build when a
+      # *currently pinned* dependency has a known vulnerability.
+      # npm audit checks package-lock.json against the npm advisory database.
+      - name: npm audit
+        run: npm audit --audit-level=high
+      # pip-audit checks the locked python packages against the PyPA advisory
+      # database. uv export flattens uv.lock into the requirements format
+      # pip-audit understands; the export includes hashes, which is what lets
+      # --disable-pip resolve the audit without a pip installation step.
+      - name: pip-audit
+        run: |
+          uv export --format requirements-txt --all-groups --no-emit-project \
+            --output-file "$RUNNER_TEMP/requirements.txt"
+          uv run pip-audit --disable-pip -r "$RUNNER_TEMP/requirements.txt"
+      # zizmor lints the workflows in .github/workflows for security footguns
+      # (unpinned actions, credential persistence, template injection, ...).
+      # GH_TOKEN only enables its extra online audits - read-only is plenty.
+      - name: zizmor
+        run: uv run zizmor .github/workflows/
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Blocks PRs that introduce dependencies with known vulnerabilities (same
+  # high bar as the npm audit step). Diff-based - it compares the PR against
+  # the base - so it only exists on pull_request events.
+  # Free for public repos. If you clone/fork this repo and make it PRIVATE,
+  # delete this job (or buy GitHub Advanced Security): without GHAS the API
+  # this action needs is unavailable on private repos and the job fails.
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
 
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # don't leave the workflow token in .git/config for later steps
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version-file: pyproject.toml

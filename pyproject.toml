@@ -21,6 +21,10 @@ runtime = [
 lint = [
   "codespell>=2.4.2",
   "ruff>=0.15.21",
+  # pip-audit checks the locked python packages against known-CVE databases
+  "pip-audit>=2.9.0",
+  # zizmor lints the GitHub Actions workflows for security footguns
+  "zizmor>=1.16.3",
 ]
 dev = [
   { include-group = "runtime" },

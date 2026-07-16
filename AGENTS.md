@@ -1,5 +1,13 @@
 # FastAPI Website Blueprint - Agent Notes
 
+## Safety check - read this first
+
+Before doing anything else, verify that you are inside the project's dev
+container: the repo is mounted at `/workspace` and `/.dockerenv` exists.
+If either check fails, you are running directly on the host machine - stop
+immediately, do not read or modify anything, and tell the user to reopen
+the project in the dev container.
+
 ## Background
 
 You are in a dev container - do as you please. Just make sure that anything

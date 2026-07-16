@@ -35,7 +35,7 @@ and modify anything inside the ephemeral container as they please.
 
 ## Commands
 
-For a list of common commands, see [CHEATSHEET.md](CHEATSHEET.md).
+For a list of common commands, see [CHEATSHEET.md](docs/CHEATSHEET.md).
 
 ## Dependencies
 
@@ -68,10 +68,8 @@ zizmor .github/workflows/  # security lint of the CI workflows
 
 ## Extras
 
-- [For Humans](./docs_for_human/README.md)
-- [For Agents & AI Assistants](./AGENTS.md)
-- [Contributing](./CONTRIBUTING.md)
-- [Security policy](./SECURITY.md)
+- [For Agents & AI Assistants](AGENTS.md)
+- [Documentation](docs/README.md)
 
 ## License
 

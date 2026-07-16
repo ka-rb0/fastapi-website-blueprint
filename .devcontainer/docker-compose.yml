@@ -27,8 +27,14 @@ services:
       DATA_PATH: ${DATA_PATH}
       WEBSITE_INTERNAL_PORT: ${WEBSITE_INTERNAL_PORT:?set it in .devcontainer/.env, see .env.example}
       WEBSITE_TEST_PORT: ${WEBSITE_TEST_PORT:-20177}
+    # No privilege escalation via setuid binaries, and drop the raw-socket capability.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - NET_RAW
     ports:
-      - "${WEBSITE_EXTERNAL_PORT:?set it in .devcontainer/.env, see .env.example}:${WEBSITE_INTERNAL_PORT}"
+      # 127.0.0.1 is only reachable from this machine, 0.0.0.0 exposes it to the LAN.
+      - "${WEBSITE_BIND_HOST:-127.0.0.1}:${WEBSITE_EXTERNAL_PORT:?set it in .devcontainer/.env, see .env.example}:${WEBSITE_INTERNAL_PORT}"
     networks:
       - fastapi-website-blueprint-network
     command: sleep infinity

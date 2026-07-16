@@ -62,7 +62,10 @@ jobs:
         run: uv run codespell .
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "26"
+          # engines.node in package.json is the single source of truth for the
+          # Node major (the dev image copies node from an image pinned to the
+          # same major - tests/test_node_version_consistency.py ties the two)
+          node-version-file: package.json
           cache: npm
       # exact tool versions from package-lock.json
       - name: Install npm tools

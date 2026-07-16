@@ -8,7 +8,8 @@ built from it.
 - Run the checks CI runs - the commands are in
   [CHEATSHEET.md](docs/CHEATSHEET.md); the pre-push hook runs all of them when a
   push targets `main`.
-- Cover new or changed behavior with a test.
+- Cover new or changed behavior with a test - CI enforces the coverage
+  threshold set in `[tool.coverage.report]` in `pyproject.toml`.
 - Update the docs when commands or setup steps change.
 
 ## Ground rules

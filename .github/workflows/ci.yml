@@ -152,5 +152,8 @@ jobs:
       - name: Install Chromium system deps
         if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: uv run playwright install-deps chromium
+      # --cov measures coverage of the app package (uvicorn subprocess
+      # included) and fails under the threshold - both configured in
+      # [tool.coverage.*] in pyproject.toml, the single source of truth
       - name: Run tests
-        run: uv run pytest
+        run: uv run pytest --cov

@@ -39,7 +39,7 @@ run uv run codespell .
 run npx prettier --check .
 run npx eslint .
 run uv run mypy
-run uv run pytest
+run uv run pytest --cov
 
 echo ""
 echo "pre-push: all checks passed - pushing to main."

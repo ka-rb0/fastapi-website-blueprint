@@ -6,7 +6,7 @@ built from it.
 ## Before you open a PR
 
 - Run the checks CI runs - the commands are in
-  [CHEATSHEET.md](CHEATSHEET.md); the pre-push hook runs all of them when a
+  [CHEATSHEET.md](docs/CHEATSHEET.md); the pre-push hook runs all of them when a
   push targets `main`.
 - Cover new or changed behavior with a test.
 - Update the docs when commands or setup steps change.

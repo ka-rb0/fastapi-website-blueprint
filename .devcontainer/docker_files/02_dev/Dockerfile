@@ -1,3 +1,12 @@
+# Node.js comes from the official image - digest-pinned and Dependabot-bumped
+# like the base images, unlike the NodeSource installer script this replaces.
+# A named stage rather than a direct COPY --from=<image>: Dependabot only
+# bumps FROM lines. Same Debian release (trixie) as the python base image, so
+# the copied binary finds matching shared libraries. The major must match
+# engines.node in package.json (the single source of truth, which CI reads);
+# tests/test_node_version_consistency.py enforces that.
+FROM node:26-slim@sha256:715e55e4b84e4bb0ff48e49b398a848f08e55daed8eb6a0ea1839ae53bc57583 AS node
+
 # Use the locally built image (see ../README.md for the build order)
 FROM fastapi-website-blueprint-base-image
 
@@ -14,14 +23,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     fd-find \
     dos2unix \
+    libatomic1 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js - NodeSource pins the major, apt resolves the latest 26.x
-RUN curl -fsSL https://deb.nodesource.com/setup_26.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+# Install Node.js from the pinned stage above. The node binary needs only
+# libatomic1 (installed above) beyond what the python base image ships;
+# npm/npx are the standard symlinks into the bundled node_modules/npm
+# (recreated by hand - COPY would dereference them).
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
 # Frontend lint/format tools at the exact versions in package-lock.json (the
 # single source of truth, Dependabot-bumped). Installed to a fixed prefix -

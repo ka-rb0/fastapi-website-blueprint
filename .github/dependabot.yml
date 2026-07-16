@@ -1,8 +1,9 @@
 # Keeps every pinned version from silently aging - one entry per lock point:
 # GitHub Actions (SHA-pinned in ci.yml), python packages (uv.lock), npm lint
-# tools (package-lock.json), and the Docker base images in 01_base. The other
-# Dockerfiles build FROM local images, so there is nothing there to bump; the
-# agent CLIs in 03_agent float by design (installer scripts, no lockfile).
+# tools (package-lock.json), and the Docker images pulled in 01_base (python,
+# uv) and 02_dev (node). The other Dockerfiles build FROM local images, so
+# there is nothing there to bump; the agent CLIs in 03_agent float by design
+# (installer scripts, no lockfile).
 #
 # `groups` batches each ecosystem's minor + patch bumps into one weekly PR;
 # major bumps stay individual PRs so breaking changes get reviewed alone.
@@ -30,7 +31,9 @@ updates:
       npm-minor-and-patch:
         update-types: [minor, patch]
   - package-ecosystem: docker
-    directory: /.devcontainer/docker_files/01_base
+    directories:
+      - /.devcontainer/docker_files/01_base
+      - /.devcontainer/docker_files/02_dev
     schedule:
       interval: weekly
     groups:

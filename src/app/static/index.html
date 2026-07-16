@@ -48,7 +48,10 @@
       <p class="tagline">A minimal starting point. Build from here.</p>
 
       <!-- Example API round trip: js/main.js posts the text to /api/shout
-           (pydantic-validated) and renders the uppercased reply below. -->
+           (pydantic-validated) and renders the uppercased reply below.
+           maxlength mirrors MAX_SHOUT_LENGTH in src/app/main.py by hand
+           (tests/test_static_consistency.py enforces the match) - the server
+           still validates; this only gives instant feedback in the browser. -->
       <form class="shout" id="shout-form">
         <input
           id="shout-input"
@@ -56,6 +59,7 @@
           aria-label="Text to shout"
           placeholder="Type something…"
           autocomplete="off"
+          maxlength="1000"
           required
         />
         <button type="submit">Shout</button>

@@ -36,7 +36,7 @@ COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
-# Frontend lint/format tools at the exact versions in package-lock.json (the
+# npm-based lint/format tools at the exact versions in package-lock.json (the
 # single source of truth, Dependabot-bumped). Installed to a fixed prefix -
 # not /workspace, which the devcontainer hides behind a bind mount - and
 # exposed on PATH so plain `prettier` / `eslint` work anywhere.

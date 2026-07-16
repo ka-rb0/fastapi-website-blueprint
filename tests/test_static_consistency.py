@@ -1,15 +1,18 @@
 """
-Guards for the hand-mirrored hex values in the static frontend.
+Guards for the hand-mirrored values in the static frontend.
 
-css/theme.css is the source of truth for the design tokens, but two files
-can't read CSS variables and mirror hex values by hand: the
-<meta name="theme-color"> tags in index.html (--bg) and favicon.svg
-(--accent). These tests turn those files' "keep in sync" comments into an
-enforced invariant. Pure file checks - no server needed.
+The static files can't read their sources of truth and mirror values by
+hand: the <meta name="theme-color"> tags in index.html and favicon.svg
+mirror design tokens from css/theme.css (--bg and --accent), and the shout
+input's maxlength mirrors MAX_SHOUT_LENGTH from app.main. These tests turn
+those files' "keep in sync" comments into an enforced invariant. Pure file
+checks - no server needed.
 """
 
 import re
 from pathlib import Path
+
+from app.main import MAX_SHOUT_LENGTH
 
 STATIC_DIR = Path(__file__).parent.parent / "src" / "app" / "static"
 
@@ -43,3 +46,13 @@ def test_favicon_uses_light_accent() -> None:
     svg = (STATIC_DIR / "favicon.svg").read_text()
     colors = set(re.findall(HEX, svg))
     assert colors == {light_accent}
+
+
+def test_shout_input_maxlength_matches_api_limit() -> None:
+    """The shout input's maxlength mirrors MAX_SHOUT_LENGTH in app.main."""
+    html = (STATIC_DIR / "index.html").read_text()
+    match = re.search(r'<input\b[^>]*\bid="shout-input"[^>]*>', html, re.DOTALL)
+    assert match, '<input id="shout-input" ...> not found in index.html'
+    maxlength = re.search(r'\bmaxlength="(\d+)"', match.group(0))
+    assert maxlength, "the shout input carries no maxlength attribute"
+    assert int(maxlength.group(1)) == MAX_SHOUT_LENGTH

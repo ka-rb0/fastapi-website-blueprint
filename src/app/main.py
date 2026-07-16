@@ -38,6 +38,8 @@ app = FastAPI(title="FastAPI Website Blueprint", lifespan=lifespan)
 # frontend (no CDNs, no inline scripts - even the pre-paint theme script is a
 # file, js/theme-init.js, for exactly this reason). Extend the CSP when you
 # add external resources; don't drop it.
+# No Strict-Transport-Security here on purpose: HSTS belongs at the
+# TLS-terminating reverse proxy - the app itself only ever speaks plain HTTP.
 SECURITY_HEADERS = {
     "Content-Security-Policy": (
         "default-src 'none'; "
@@ -51,9 +53,16 @@ SECURITY_HEADERS = {
     ),
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "same-origin",
+    # No cross-window handles on this site from cross-origin openers.
+    "Cross-Origin-Opener-Policy": "same-origin",
+    # The frontend uses none of these; opt out so embedded content can't either.
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
 }
 
 
+# @app.middleware("http") wraps BaseHTTPMiddleware, which buffers streaming
+# responses and has known caveats with BackgroundTasks. Fine for stamping
+# headers on small responses; write heavier middleware as pure ASGI instead.
 @app.middleware("http")
 async def add_security_headers(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]

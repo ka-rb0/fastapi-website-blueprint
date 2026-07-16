@@ -1,7 +1,8 @@
 #!/bin/sh
-# Blocks a push to main unless the same checks CI runs (see
-# .github/workflows/ci.yml) pass locally. Pushes to other branches are
-# not guarded - CI covers them via pull_request.
+# Blocks a push to main unless the lint + test checks CI runs (see
+# .github/workflows/ci.yml) pass locally. The CI security audits (pip-audit,
+# npm audit, zizmor) are not run here - they need network access. Pushes to
+# other branches are not guarded - CI covers them via pull_request.
 #
 # Committed hooks are not active by default; activate once per clone with:
 #   git config core.hooksPath .githooks
@@ -38,6 +39,7 @@ run uv run ruff format --check .
 run uv run codespell .
 run npx prettier --check .
 run npx eslint .
+run npx markdownlint-cli2
 run uv run mypy
 run uv run pytest --cov
 

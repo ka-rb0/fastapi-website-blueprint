@@ -12,11 +12,14 @@ name: CI
 
 # push covers work on branches in this repo; pull_request additionally covers
 # PRs from forks (which never trigger push events here). Limiting push to main
-# avoids double runs on same-repo PR branches.
+# avoids double runs on same-repo PR branches. merge_group makes the required
+# checks run if a repo built from this template enables GitHub's merge queue -
+# without it, queued merges would wait forever for checks that never start.
 on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
 
 # a newer push to the same branch supersedes any run still in flight
 concurrency:
@@ -75,6 +78,9 @@ jobs:
         run: npx prettier --check .
       - name: ESLint
         run: npx eslint .
+      # globs and rule tweaks live in .markdownlint-cli2.jsonc
+      - name: Markdownlint
+        run: npx markdownlint-cli2
       # ---- security audits -----------------------------------------------
       # Dependabot keeps the pins current; these steps fail the build when a
       # *currently pinned* dependency has a known vulnerability.

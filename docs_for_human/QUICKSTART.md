@@ -13,6 +13,11 @@ uvicorn app.main:app --host 0.0.0.0 --port $WEBSITE_INTERNAL_PORT --reload
 - To preview different screen sizes, press `Ctrl+Shift+M` in the browser's
   developer tools
 
+## Normalize line endings to LF
+
+- `fdfind --type file --exec dos2unix {}`
+- `git add --renormalize .`
+
 ## Claude
 
 - `claude --version`

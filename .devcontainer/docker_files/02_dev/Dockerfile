@@ -7,12 +7,13 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 # Install extra apt-get packages (cleanup in the same RUN so the package
 # lists never become part of the layer)
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     nano \
     wget \
     curl \
     git \
+    fd-find \
+    dos2unix \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

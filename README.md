@@ -45,8 +45,9 @@ Declared once and locked everywhere:
   [pyproject.toml](pyproject.toml) (PEP 735), exact versions pinned in
   [uv.lock](uv.lock). Install manually with `uv sync` (runtime + all dev
   tools).
-- Frontend lint tools (prettier, eslint): [package.json](package.json),
-  pinned in [package-lock.json](package-lock.json). Install with `npm ci`.
+- npm-based lint tools (prettier, eslint, markdownlint):
+  [package.json](package.json), pinned in
+  [package-lock.json](package-lock.json). Install with `npm ci`.
 - Docker base images and GitHub Actions: pinned by tag / commit SHA where
   they are used.
 
@@ -62,6 +63,7 @@ ruff check . && ruff format --check .
 mypy
 eslint .
 prettier --check .  # respects .gitignore
+markdownlint-cli2  # globs + rule tweaks in .markdownlint-cli2.jsonc
 codespell .  # skip list in [tool.codespell] in pyproject.toml
 zizmor .github/workflows/  # security lint of the CI workflows
 ```

@@ -1,13 +1,14 @@
 {
   "name": "fastapi-website-blueprint-tools",
   "private": true,
-  "description": "Locked versions of the frontend lint/format tools (no build step, no runtime deps). Exact versions are pinned in package-lock.json, kept current by Dependabot. Install with `npm ci`; the devcontainer images bake them in.",
+  "description": "Locked versions of the npm-based lint/format tools (no build step, no runtime deps). Exact versions are pinned in package-lock.json, kept current by Dependabot. Install with `npm ci`; the devcontainer images bake them in.",
   "license": "MIT",
   "engines": {
     "node": "26.x"
   },
   "devDependencies": {
     "eslint": "^10.7.0",
+    "markdownlint-cli2": "^0.23.0",
     "prettier": "^3.9.5"
   }
 }

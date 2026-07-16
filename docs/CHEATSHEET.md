@@ -47,6 +47,11 @@
 - `eslint .`
 - `eslint . --fix` <- auto-fix
 
+### Markdownlint (Markdown docs)
+
+- `markdownlint-cli2` <- globs and rule tweaks come from .markdownlint-cli2.jsonc
+- `markdownlint-cli2 --fix` <- auto-fix
+
 ### Mypy (Python types)
 
 - `mypy` <- targets come from pyproject.toml

@@ -1,0 +1,10 @@
+// markdownlint-cli2 config: run as plain `markdownlint-cli2` (globs live
+// here, so CI, the pre-push hook and manual runs stay identical).
+{
+  "globs": ["**/*.md"],
+  // skip everything .gitignore skips
+  "gitignore": true,
+  "config": {
+    "line-length": false,
+  },
+}

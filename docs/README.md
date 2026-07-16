@@ -4,7 +4,7 @@
 - [Cheatsheet](CHEATSHEET.md)
 - [GitHub Setup](GITHUB_SETUP.md)
 
-# Resources
+## Resources
 
 - [Projects Readme](../README.md)
 - [Contributing](../CONTRIBUTING.md)

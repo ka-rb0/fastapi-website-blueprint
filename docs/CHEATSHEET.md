@@ -20,6 +20,9 @@
   Chromium; starts its own uvicorn server on port $WEBSITE_TEST_PORT, so the dev server
   can stay running.
 - `pytest tests/test_api.py` <- skips the slower E2E suite
+- `pytest --cov` <- what CI runs: adds app coverage (uvicorn subprocess
+  included) and fails under the threshold in `[tool.coverage.report]`
+- `coverage html` <- browsable per-line report in htmlcov/ (after `pytest --cov`)
 
 ## Linting
 
@@ -57,6 +60,8 @@
 
 ## Git hooks
 
-- `git config core.hooksPath .githooks` <- one-time activation per clone;
-  after that, `.githooks/pre-push` blocks any push to main unless the full
-  CI suite (lint + tests) passes locally
+- `.githooks/pre-push` blocks any push to main unless the full CI suite
+  (lint + tests) passes locally. The devcontainer activates it automatically
+  (postCreateCommand in devcontainer.json).
+- `git config core.hooksPath .githooks` <- one-time manual activation for
+  clones used outside the devcontainer

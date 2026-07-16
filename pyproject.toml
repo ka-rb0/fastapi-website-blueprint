@@ -32,6 +32,7 @@ dev = [
   "mypy>=2.2.0",
   "playwright>=1.61.0",
   "pytest>=9.1.1",
+  "pytest-cov>=7.0.0",
 ]
 
 [tool.codespell]
@@ -105,3 +106,22 @@ disallow_untyped_calls = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]  # so tests can import `app.*` without PYTHONPATH (CI)
+
+[tool.coverage.run]
+# The suite exercises the app in a uvicorn *subprocess* (tests/conftest.py),
+# which plain coverage cannot see. Two settings make it visible:
+# - patch = ["subprocess"]: coverage starts itself inside python subprocesses
+#   and merges their data (the subprocess saves it at interpreter exit - which
+#   is why conftest.py stops uvicorn with SIGINT, not SIGTERM).
+# - source = ["app"] is the *package* name, not a path: it resolves in both
+#   the pytest process and the subprocess (whose cwd is src/), a path would not.
+source = ["app"]
+branch = true
+patch = ["subprocess"]
+
+[tool.coverage.report]
+show_missing = true
+# 100 is honest while the app is this small - every endpoint has a test. If a
+# project grown from this template needs to lower it, lower it deliberately
+# here (one source of truth: CI and the pre-push hook run plain `pytest --cov`)
+fail_under = 100

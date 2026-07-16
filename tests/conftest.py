@@ -7,6 +7,7 @@ TestClient dependency - API tests hit the live server with urllib.
 """
 
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -57,10 +58,14 @@ def server() -> Iterator[str]:
                 time.sleep(0.2)
         yield BASE_URL
     finally:
-        proc.terminate()
+        # SIGINT, not terminate(): uvicorn shuts down gracefully on both, but
+        # after SIGTERM it re-raises the signal, killing the process without
+        # running atexit hooks - and atexit is where coverage saves this
+        # subprocess's data (see [tool.coverage.run] in pyproject.toml).
+        proc.send_signal(signal.SIGINT)
         try:
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
-            # uvicorn ignored SIGTERM - don't let teardown hang the suite
+            # uvicorn ignored the signal - don't let teardown hang the suite
             proc.kill()
             proc.wait()

@@ -14,7 +14,13 @@
         "anthropic.claude-code"
       ]
     }
-  }
-  // No postCreateCommand: dependencies are baked into the image
-  // (see docker_files/) at the exact versions in uv.lock / package-lock.json.
+  },
+  // Activate the committed git hooks (.githooks/pre-push guards pushes to
+  // main) - the one piece of per-clone setup git can't inherit from the repo.
+  // Dependencies need no such step: they are baked into the image (see
+  // docker_files/) at the exact versions in uv.lock / package-lock.json.
+  // The setting lands in .git/config on the bind mount, so it also covers
+  // git usage from the host. Clones used outside the devcontainer activate
+  // it manually (see docs/CHEATSHEET.md).
+  "postCreateCommand": "git config core.hooksPath .githooks"
 }

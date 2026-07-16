@@ -8,13 +8,13 @@ Run with:  uvicorn app.main:app --host 0.0.0.0 --port $WEBSITE_INTERNAL_PORT --r
 
 import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +33,53 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="FastAPI Website Blueprint", lifespan=lifespan)
 
+# Defense-in-depth headers on every response (static files and API alike).
+# The CSP allows only same-origin resources, which matches the self-contained
+# frontend (no CDNs, no inline scripts - even the pre-paint theme script is a
+# file, js/theme-init.js, for exactly this reason). Extend the CSP when you
+# add external resources; don't drop it.
+SECURITY_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'none'; "
+        "script-src 'self'; "
+        "style-src 'self'; "
+        "img-src 'self'; "
+        "connect-src 'self'; "
+        "base-uri 'none'; "
+        "form-action 'self'; "
+        "frame-ancestors 'none'"
+    ),
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "same-origin",
+}
+
+
+@app.middleware("http")
+async def add_security_headers(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    response = await call_next(request)
+    response.headers.update(SECURITY_HEADERS)
+    return response
+
+
+MAX_SHOUT_LENGTH = 1000
+
 
 class ShoutPayload(BaseModel):
     """Body of POST /api/shout - pydantic rejects anything without a string `text`."""
+
+    text: str = Field(max_length=MAX_SHOUT_LENGTH)
+
+
+class ShoutReply(BaseModel):
+    """
+    Reply of POST /api/shout - its own model, because replies aren't inputs.
+
+    Reusing ShoutPayload would apply max_length to the *response*, and
+    uppercasing can lengthen text ("ß".upper() == "SS") - valid input could
+    then produce an invalid reply, a 500.
+    """
 
     text: str
 
@@ -46,9 +90,9 @@ def health() -> dict[str, str]:
 
 
 @app.post("/api/shout")
-def shout(payload: ShoutPayload) -> ShoutPayload:
+def shout(payload: ShoutPayload) -> ShoutReply:
     """Reply with the text uppercased - the frontend's example API round trip."""
-    return ShoutPayload(text=payload.text.upper())
+    return ShoutReply(text=payload.text.upper())
 
 
 # Mounted last so /api routes take precedence over static files.

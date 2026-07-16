@@ -1,0 +1,48 @@
+# CodeQL static analysis of the python backend and the vanilla-JS frontend.
+# Findings appear under the repo's Security tab (Code scanning alerts).
+#
+# Free for PUBLIC repos only. If you clone/fork this repo and make it private,
+# delete this workflow (or disable it in the Actions tab) - code scanning on
+# private repos requires paid GitHub Advanced Security, and the results upload
+# fails without it.
+#
+# Same pinning rules as ci.yml: actions pinned to commit SHAs, kept current by
+# Dependabot.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly re-scan: CodeQL's query packs improve continuously, so unchanged
+    # code can grow new findings between pushes.
+    - cron: "27 4 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# default to nothing; the job grants itself exactly what it needs
+permissions: {}
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read # checkout
+      security-events: write # upload the analysis results
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # don't leave the workflow token in .git/config for later steps
+          persist-credentials: false
+      - uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+        with:
+          languages: ${{ matrix.language }}
+      - uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0

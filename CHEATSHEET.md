@@ -48,9 +48,15 @@
 
 - `mypy` <- targets come from pyproject.toml
 
+## Security audits
+
+- `npm audit --audit-level=high` <- npm advisory database vs package-lock.json
+- `uv export --format requirements-txt --all-groups --no-emit-project --output-file /tmp/reqs.txt && pip-audit --disable-pip -r /tmp/reqs.txt`
+  <- PyPA advisory database vs uv.lock
+- `zizmor .github/workflows/` <- security lint of the GitHub Actions workflows
+
 ## Git hooks
 
 - `git config core.hooksPath .githooks` <- one-time activation per clone;
   after that, `.githooks/pre-push` blocks any push to main unless the full
   CI suite (lint + tests) passes locally
-- `git push --no-verify` <- emergency bypass of the hook

@@ -4,7 +4,7 @@ FROM ghcr.io/astral-sh/uv:0.11.29@sha256:eb2843a1e56fd9e30c7276ce1a52cba86e64c7b
 
 # Pinned to the same Python line as requires-python in pyproject.toml;
 # Dependabot bumps both tags and digests (see .github/dependabot.yml).
-FROM python:3.14-slim@sha256:d3400aa122fa42cf0af0dbe8ec3091b047eac5c8f7e3539f7135e86d855dc015
+FROM python:3.14-slim@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea54bca189ce14a6
 
 COPY --from=uv /uv /uvx /usr/local/bin/
 

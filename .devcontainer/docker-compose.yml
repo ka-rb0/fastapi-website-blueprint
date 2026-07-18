@@ -13,6 +13,7 @@ services:
       - ..:/workspace
       - ../shared_folder/data:${DATA_PATH:?set it in .devcontainer/.env, see .env.example}
       - ${CLAUDE_HOME_HOST_PATH:?set it in .devcontainer/.env, see .env.example}:/root/.claude
+      - ${CODEX_HOME_HOST_PATH:?set it in .devcontainer/.env, see .env.example}:/root/.codex
       # Anonymous volumes: keep these container-generated directories from
       # syncing back to the host.
       - /workspace/.pytest_cache

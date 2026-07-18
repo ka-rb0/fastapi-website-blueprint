@@ -44,6 +44,9 @@ COPY package.json package-lock.json /opt/npm-tools/
 RUN npm ci --prefix /opt/npm-tools --no-audit --no-fund \
     && npm cache clean --force
 ENV PATH="/opt/npm-tools/node_modules/.bin:${PATH}"
+# Let Node-based config files resolve packages from the same baked-in prefix.
+# CommonJS resolution (including createRequire from ESM) honors NODE_PATH.
+ENV NODE_PATH=/opt/npm-tools/node_modules
 
 # Install the dev python packages (pytest, mypy, ruff, playwright, …) at the
 # exact versions in uv.lock - same pattern and reasoning as the base image.

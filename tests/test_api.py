@@ -48,7 +48,11 @@ def test_shout_rejects_oversized_text(server: str) -> None:
 
 @pytest.mark.parametrize("path", ["/", "/api/health"])
 def test_security_headers(server: str, path: str) -> None:
-    """The middleware puts the headers on every response - static and API alike."""
+    """
+    The ASGI wrapper puts the headers on every response - static and API alike.
+
+    Error responses are covered in test_security_headers.py.
+    """
     with urllib.request.urlopen(f"{server}{path}", timeout=5) as resp:
         for name, value in SECURITY_HEADERS.items():
             assert resp.headers[name] == value

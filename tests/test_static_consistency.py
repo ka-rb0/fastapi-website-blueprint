@@ -2,7 +2,7 @@
 Guards for the hand-mirrored values in the static frontend.
 
 The static files can't read their sources of truth and mirror values by
-hand: the <meta name="theme-color"> tags in index.html and favicon.svg
+hand: the <meta name="theme-color"> tags in the HTML pages and favicon.svg
 mirror design tokens from css/theme.css (--bg and --accent), and the shout
 input's maxlength mirrors MAX_SHOUT_LENGTH from app.main. These tests turn
 those files' "keep in sync" comments into an enforced invariant. Pure file
@@ -11,6 +11,8 @@ checks - no server needed.
 
 import re
 from pathlib import Path
+
+import pytest
 
 from app.main import MAX_SHOUT_LENGTH
 
@@ -27,10 +29,11 @@ def _token(name: str) -> tuple[str, str]:
     return match.group(1), match.group(2)
 
 
-def test_theme_color_metas_match_bg() -> None:
+@pytest.mark.parametrize("page", ["index.html", "not-found.html"])
+def test_theme_color_metas_match_bg(page: str) -> None:
     """The <meta name="theme-color"> tags mirror --bg for each scheme."""
     light, dark = _token("bg")
-    html = (STATIC_DIR / "index.html").read_text()
+    html = (STATIC_DIR / page).read_text()
     metas = dict(
         re.findall(
             rf'media="\(prefers-color-scheme: (light|dark)\)"\s+content="({HEX})"',

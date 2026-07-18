@@ -38,6 +38,9 @@ def server() -> Iterator[str]:
             str(PORT),
         ],
         cwd=SRC_DIR,
+        # Docs on, explicitly: the suite tests the /docs page and its CSP
+        # exception, so it must not depend on the shell's environment.
+        env={**os.environ, "WEBSITE_ENABLE_DOCS": "1"},
     )
     try:
         deadline = time.monotonic() + 15

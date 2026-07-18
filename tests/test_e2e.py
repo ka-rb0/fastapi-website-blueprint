@@ -3,7 +3,7 @@
 from collections.abc import Iterator
 
 import pytest
-from playwright.sync_api import Browser, Page, expect, sync_playwright
+from playwright.sync_api import Browser, ConsoleMessage, Page, expect, sync_playwright
 
 
 @pytest.fixture(scope="module")
@@ -43,6 +43,67 @@ def test_shout_round_trip(page: Page) -> None:
     page.get_by_role("button", name="Shout").click()
     # <output> exposes the implicit ARIA role "status"
     expect(page.get_by_role("status")).to_have_text("HELLO")
+
+
+def test_docs_renders_swagger_ui(browser: Browser, server: str) -> None:
+    """
+    The /docs page renders under its relaxed CSP (DOCS_CSP in app.main).
+
+    Rendering the schema proves the whole chain: the CDN assets and inline
+    boot script are allowed through, and Swagger UI paints. CSP violations
+    surface as console errors, so any that slip past the render checks are
+    asserted away too. Needs cdn.jsdelivr.net reachable - just like the
+    /docs page itself.
+    """
+    csp_errors: list[str] = []
+
+    def on_console(msg: ConsoleMessage) -> None:
+        if msg.type == "error" and "Content Security Policy" in msg.text:
+            csp_errors.append(msg.text)
+
+    page = browser.new_page()
+    try:
+        page.on("console", on_console)
+        page.goto(f"{server}/docs")
+        ui = page.locator("#swagger-ui")
+        expect(ui).to_contain_text("FastAPI Website Blueprint")
+        expect(ui).to_contain_text("/api/shout")
+        assert csp_errors == []
+    finally:
+        page.close()
+
+
+def test_mobile_layout(browser: Browser, server: str) -> None:
+    """
+    At a narrow phone viewport nothing may overflow or overlap.
+
+    The fixed theme switch and the wide letter-spaced heading are only
+    exercised at Playwright's default desktop viewport by the other tests.
+    """
+    page = browser.new_page(viewport={"width": 375, "height": 667})
+    try:
+        page.goto(server)
+        assert page.evaluate(
+            "document.documentElement.scrollWidth"
+            " <= document.documentElement.clientWidth"
+        ), "page overflows horizontally at 375px"
+
+        heading = page.get_by_role("heading", name="FastAPI Website Blueprint")
+        switch = page.get_by_role("group", name="Color theme")
+        expect(heading).to_be_visible()
+        expect(switch).to_be_visible()
+        heading_box = heading.bounding_box()
+        switch_box = switch.bounding_box()
+        assert heading_box is not None and switch_box is not None
+        overlaps = (
+            heading_box["x"] < switch_box["x"] + switch_box["width"]
+            and switch_box["x"] < heading_box["x"] + heading_box["width"]
+            and heading_box["y"] < switch_box["y"] + switch_box["height"]
+            and switch_box["y"] < heading_box["y"] + heading_box["height"]
+        )
+        assert not overlaps, "theme switch overlaps the heading at 375px"
+    finally:
+        page.close()
 
 
 def test_follows_os_scheme_until_choice(browser: Browser, server: str) -> None:

@@ -15,7 +15,8 @@
 
 :root {
   /* Two files mirror these hex values by hand because they can't read CSS
-     variables: the <meta name="theme-color"> tags in index.html (--bg) and
+     variables: the <meta name="theme-color"> tags in index.html and
+     not-found.html (--bg) and
      favicon.svg (--accent). Re-theming? Update those too -
      tests/test_static_consistency.py fails until they match. */
   /*                 light    dark  */

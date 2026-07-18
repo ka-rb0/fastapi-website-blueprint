@@ -28,6 +28,9 @@ services:
       DATA_PATH: ${DATA_PATH}
       WEBSITE_INTERNAL_PORT: ${WEBSITE_INTERNAL_PORT:?set it in .devcontainer/.env, see .env.example}
       WEBSITE_TEST_PORT: ${WEBSITE_TEST_PORT:-20177}
+      # Interactive API docs (/docs) are a dev tool: on by default in this
+      # dev container, off anywhere the variable isn't set (production).
+      WEBSITE_ENABLE_DOCS: ${WEBSITE_ENABLE_DOCS:-1}
     # No privilege escalation via setuid binaries, and drop the raw-socket capability.
     security_opt:
       - no-new-privileges:true

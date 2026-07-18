@@ -1,0 +1,10 @@
+#!/bin/sh
+# The full test suite - the same pytest invocation CI's test job uses (CI
+# additionally runs mypy there; scripts/lint covers that here): API tests +
+# Playwright E2E against a live uvicorn server, with coverage measured and
+# enforced ([tool.coverage.*] in pyproject.toml is the single source of truth).
+. "$(dirname -- "$0")/lib.sh"
+
+check uv run pytest --cov
+
+summary

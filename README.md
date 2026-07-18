@@ -57,6 +57,17 @@ the pins current.
 
 ## Tests & linting
 
+One-shot wrappers (`scripts/lint` keeps going on failure and summarizes, so
+one run shows everything that is wrong):
+
+```sh
+scripts/lint  # every check below in one run
+scripts/fix   # every auto-fixer in one run
+scripts/test  # the full test suite with enforced coverage (CI's pytest call)
+```
+
+Individual tools:
+
 ```sh
 pytest  # from the repo root: API tests + Playwright E2E
 ruff check . && ruff format --check .

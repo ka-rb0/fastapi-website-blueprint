@@ -1,0 +1,28 @@
+#!/bin/sh
+# The security audits that need network access, in one run - the same ones
+# CI runs (see .github/workflows/ci.yml): pip-audit and npm audit check the
+# locked dependencies against the public advisory databases; zizmor's online
+# audits go beyond the offline run in scripts/lint (they need GH_TOKEN -
+# without one, zizmor falls back to offline mode with a warning).
+# Neither the pre-push hook nor scripts/lint runs these - they need network.
+. "$(dirname -- "$0")/lib.sh"
+
+# uv export flattens uv.lock into the requirements format pip-audit
+# understands; the export includes hashes, which is what lets --disable-pip
+# resolve the audit without a pip installation step. One function so `check`
+# can't record a false pass from auditing a missing or empty export.
+pip_audit_locked() {
+  reqs="$(mktemp)" || return 1
+  uv export --quiet --format requirements-txt --all-groups --no-emit-project \
+    --output-file "$reqs" &&
+    uv run pip-audit --disable-pip -r "$reqs"
+  status=$?
+  rm -f "$reqs"
+  return "$status"
+}
+
+check pip_audit_locked
+check npm audit --audit-level=high
+check uv run zizmor .github/workflows/
+
+summary

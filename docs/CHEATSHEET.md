@@ -7,6 +7,8 @@
 - `scripts/fix` <- every auto-fixer in one run
 - `scripts/test` <- the full test suite with enforced coverage (the same
   pytest invocation CI uses)
+- `scripts/audit` <- the security audits that need network access (the same
+  ones CI runs)
 
 The sections below run the same tools one at a time.
 
@@ -18,7 +20,7 @@ The sections below run the same tools one at a time.
 - `uv sync --only-group runtime` <- just what the app needs
 - `uv lock --upgrade` <- refresh uv.lock to the latest versions by hand
   (Dependabot does this weekly)
-- `npm ci` <- prettier + eslint at the exact versions in package-lock.json
+- `npm ci` <- prettier + eslint + markdownlint-cli2 at the exact versions in package-lock.json
   (only needed outside the devcontainer - the dev image bakes the tools into
   /opt/npm-tools and puts them on PATH, so `/workspace/node_modules` stays empty)
 
@@ -70,14 +72,16 @@ The sections below run the same tools one at a time.
 
 ## Security audits
 
+- `scripts/audit` <- the three audits below in one run
 - `npm audit --audit-level=high` <- npm advisory database vs package-lock.json
 - `uv export --format requirements-txt --all-groups --no-emit-project --output-file /tmp/reqs.txt && pip-audit --disable-pip -r /tmp/reqs.txt`
   <- PyPA advisory database vs uv.lock
 - `zizmor .github/workflows/` <- security lint of the GitHub Actions workflows
+  (scripts/lint runs its offline subset; GH_TOKEN enables the online audits)
 
 ## Git hooks
 
-- `.githooks/pre-push` blocks any push to main unless `scripts/lint` and
+- `.githooks/pre-push` blocks any branch push unless `scripts/lint` and
   `scripts/test` pass locally. The devcontainer activates it automatically
   (postCreateCommand in devcontainer.json).
 - `git config core.hooksPath .githooks` <- one-time manual activation for

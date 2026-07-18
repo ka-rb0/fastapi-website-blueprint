@@ -24,6 +24,12 @@ body {
 
 /* --- theme switch ------------------------------------------------------- */
 
+.theme-switch[hidden] {
+  /* the display: flex below would otherwise beat the UA's [hidden] rule -
+     the switch must stay invisible until js/main.js has wired it */
+  display: none;
+}
+
 .theme-switch {
   /* fixed, not absolute: stays put when the page scrolls */
   position: fixed;

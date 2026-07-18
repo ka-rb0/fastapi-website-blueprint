@@ -4,10 +4,11 @@
 # fail-fast individual commands (see docs/CHEATSHEET.md). Auto-fix what is
 # fixable with scripts/fix; run the test suite with scripts/test.
 #
-# The pre-push hook runs this (plus scripts/test) before a push to main.
+# The pre-push hook runs this (plus scripts/test) before every push.
 # CI runs the same tools as separate steps on purpose - per-step names, logs
 # and timings in the Actions UI beat deduplication - keep the two lists in
-# sync (the CI security audits stay CI-only: they need network access).
+# sync. zizmor runs offline here (no network in the gate); the security
+# audits that need network access live in scripts/audit and CI.
 . "$(dirname -- "$0")/lib.sh"
 
 require_npm_tools
@@ -18,6 +19,7 @@ check uv run codespell .
 check prettier --check .
 check eslint .
 check markdownlint-cli2
+check uv run zizmor --offline .github/workflows/
 check uv run mypy
 
 summary

@@ -64,6 +64,7 @@ one run shows everything that is wrong):
 scripts/lint  # every check below in one run
 scripts/fix   # every auto-fixer in one run
 scripts/test  # the full test suite with enforced coverage (CI's pytest call)
+scripts/audit # the security audits that need network (pip-audit, npm audit, zizmor)
 ```
 
 Individual tools:

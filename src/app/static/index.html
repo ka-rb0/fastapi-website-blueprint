@@ -35,8 +35,9 @@
       <!-- Inside <header> so landmark navigation reaches it; position: fixed
            keeps it out of the flow. aria-pressed is owned by js/main.js:
            hardcoding it here would be wrong whenever a saved choice exists.
-           Auto = follow the OS scheme. -->
-      <div class="theme-switch" role="group" aria-label="Color theme">
+           Auto = follow the OS scheme. Ships hidden - without JS the buttons
+           would be dead controls; js/main.js reveals the group once wired. -->
+      <div class="theme-switch" role="group" aria-label="Color theme" hidden>
         <button type="button" data-theme-choice="light">Light</button>
         <button type="button" data-theme-choice="auto">Auto</button>
         <button type="button" data-theme-choice="dark">Dark</button>

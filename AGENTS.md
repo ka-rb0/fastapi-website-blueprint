@@ -26,6 +26,8 @@ See [README.md](README.md) for the full feature description.
   failure and summarizes, so one run shows everything that is wrong
 - `scripts/fix` - every auto-fixer in one run
 - `scripts/test` - the full test suite (the same pytest invocation CI uses)
+- `scripts/audit` - the security audits that need network access (the same
+  ones CI runs); run it when you touch dependencies or workflows
 
-Run these before declaring work done. Individual per-tool commands are in
-[docs/CHEATSHEET.md](docs/CHEATSHEET.md).
+Run `scripts/lint` and `scripts/test` before declaring work done.
+Individual per-tool commands are in [docs/CHEATSHEET.md](docs/CHEATSHEET.md).

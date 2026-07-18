@@ -5,7 +5,8 @@
 // forces one scheme. This script only owns the switch buttons and persists
 // explicit choices.
 
-const themeButtons = document.querySelectorAll("[data-theme-choice]");
+const themeSwitch = document.querySelector(".theme-switch");
+const themeButtons = themeSwitch.querySelectorAll("[data-theme-choice]");
 
 function selectedChoice() {
   return document.documentElement.dataset.theme ?? "auto";
@@ -44,6 +45,9 @@ for (const button of themeButtons) {
 }
 
 syncButtons();
+// The switch ships hidden (see index.html) - without JS it would be dead
+// buttons. Reveal it only now that the handlers above are wired.
+themeSwitch.hidden = false;
 
 // --- shout example ---------------------------------------------------------
 //

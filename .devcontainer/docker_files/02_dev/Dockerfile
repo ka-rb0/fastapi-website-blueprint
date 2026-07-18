@@ -15,7 +15,11 @@ FROM fastapi-website-blueprint-base-image
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Install extra apt-get packages (cleanup in the same RUN so the package
-# lists never become part of the layer)
+# lists never become part of the layer). Unpinned on purpose: Dependabot has
+# no apt ecosystem to keep `package=version` pins current, and Debian drops
+# superseded versions from the mirrors, so exact pins would eventually break
+# the build. The versions effectively track the digest-pinned Debian release
+# of the base image - within a stable release apt only serves patch updates.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nano \
     wget \

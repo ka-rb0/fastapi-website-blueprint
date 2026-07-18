@@ -2,8 +2,8 @@
 # Blocks a push to any branch unless the checks CI runs (see
 # .github/workflows/ci.yml) pass locally: scripts/lint + scripts/test.
 # The CI security audits (pip-audit, npm audit, zizmor) are not run here -
-# they need network access. Deletion-only pushes are not guarded - there is
-# nothing new to check.
+# they need network access. Tag pushes and deletion-only pushes are not
+# guarded - they introduce no new code to check.
 #
 # Committed hooks are not active by default; activate once per clone with:
 #   git config core.hooksPath .githooks
@@ -14,10 +14,14 @@ zero_sha="0000000000000000000000000000000000000000"
 
 # stdin: one line per ref being pushed: <local ref> <local sha> <remote ref> <remote sha>
 pushing_commits=""
-while read -r _local_ref local_sha _remote_ref _remote_sha; do
-  if [ "$local_sha" != "$zero_sha" ]; then
-    pushing_commits=1
-  fi
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+  case "$remote_ref" in
+    refs/heads/*)
+      if [ "$local_sha" != "$zero_sha" ]; then
+        pushing_commits=1
+      fi
+      ;;
+  esac
 done
 [ -z "$pushing_commits" ] && exit 0
 

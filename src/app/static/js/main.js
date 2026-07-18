@@ -52,7 +52,7 @@ syncButtons();
 
 const shoutForm = document.querySelector("#shout-form");
 const shoutInput = document.querySelector("#shout-input");
-const shoutButton = document.querySelector("#shout-form button");
+const shoutButton = shoutForm.querySelector("button[type=submit]");
 const shoutOutput = document.querySelector("#shout-output");
 
 shoutForm.addEventListener("submit", async (event) => {

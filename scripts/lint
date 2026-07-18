@@ -1,7 +1,7 @@
 #!/bin/sh
 # Every read-only check in one run. Keeps going on failure and summarizes at
 # the end, so a single run shows everything that is wrong - unlike the
-# fail-fast individual commands (see docs/CHEATSHEET.md). Auto-fix what is
+# fail-fast individual commands (see docs/TEST_AND_LINT.md). Auto-fix what is
 # fixable with scripts/fix; run the test suite with scripts/test.
 #
 # The pre-push hook runs this (plus scripts/test) before every push.

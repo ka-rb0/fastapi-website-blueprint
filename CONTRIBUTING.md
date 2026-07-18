@@ -6,7 +6,7 @@ built from it.
 ## Before you open a PR
 
 - Run the checks CI runs - `scripts/lint` and `scripts/test` (per-tool
-  commands are in [CHEATSHEET.md](docs/CHEATSHEET.md)); the pre-push hook
+  commands are in [Test & Lint](docs/TEST_AND_LINT.md)); the pre-push hook
   runs both on every push.
 - Cover new or changed behavior with a test - CI enforces the coverage
   threshold set in `[tool.coverage.report]` in `pyproject.toml`.

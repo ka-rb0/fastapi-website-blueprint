@@ -52,9 +52,13 @@ SECURITY_HEADERS = {
         "frame-ancestors 'none'"
     ),
     "X-Content-Type-Options": "nosniff",
+    # Legacy complement to the CSP's frame-ancestors for pre-CSP2 browsers.
+    "X-Frame-Options": "DENY",
     "Referrer-Policy": "same-origin",
-    # No cross-window handles on this site from cross-origin openers.
+    # No cross-window handles on this site from cross-origin openers, and no
+    # cross-origin embedding of this site's resources.
     "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
     # The frontend uses none of these; opt out so embedded content can't either.
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
 }
@@ -94,12 +98,12 @@ class ShoutReply(BaseModel):
 
 
 @app.get("/api/health")
-def health() -> dict[str, str]:
+async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.post("/api/shout")
-def shout(payload: ShoutPayload) -> ShoutReply:
+async def shout(payload: ShoutPayload) -> ShoutReply:
     """Reply with the text uppercased - the frontend's example API round trip."""
     return ShoutReply(text=payload.text.upper())
 

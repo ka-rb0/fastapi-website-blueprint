@@ -29,7 +29,7 @@ def test_title(page: Page) -> None:
 
 def test_heading_visible(page: Page) -> None:
     expect(
-        page.get_by_role("heading", name="FASTAPI WEBSITE BLUEPRINT")
+        page.get_by_role("heading", name="FastAPI Website Blueprint")
     ).to_be_visible()
 
 

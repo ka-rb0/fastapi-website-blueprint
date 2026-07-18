@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Page not found · FastAPI Website Blueprint</title>
+    <!-- Absolute URLs throughout: this page is served for any missing path
+         (e.g. /some/deep/url), where relative URLs would resolve against the
+         missing path's directory instead of the site root. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- Same hand-mirrored --bg values as index.html; see the comment there.
+         tests/test_static_consistency.py enforces the match for both pages.
+         Named not-found.html, not 404.html: StaticFiles(html=True) would
+         auto-serve a 404.html for every miss, /api included - the exception
+         handler in src/app/main.py must stay in charge instead. -->
+    <meta
+      name="theme-color"
+      media="(prefers-color-scheme: light)"
+      content="#f5f5fa"
+    />
+    <meta
+      name="theme-color"
+      media="(prefers-color-scheme: dark)"
+      content="#15151d"
+    />
+    <link rel="stylesheet" href="/css/theme.css" />
+    <link rel="stylesheet" href="/css/style.css" />
+    <!-- Re-applies a saved theme before first paint, like index.html does.
+         js/main.js is deliberately absent: it requires the theme switch and
+         the shout form, and this page carries neither. -->
+    <script src="/js/theme-init.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1>Page not found</h1>
+    </header>
+
+    <main>
+      <p class="tagline">There is nothing at this address.</p>
+      <p><a href="/">Back to the home page</a></p>
+    </main>
+  </body>
+</html>

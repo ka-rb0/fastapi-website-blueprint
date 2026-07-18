@@ -12,10 +12,14 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.datastructures import MutableHeaders
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
@@ -82,7 +86,9 @@ SECURITY_HEADERS = {
 # of yours needs one. FastAPI's generated /docs page loads Swagger UI from
 # cdn.jsdelivr.net, boots it with an inline script, and the UI injects inline
 # styles and data: images while rendering; its favicon comes from
-# fastapi.tiangolo.com. Each relaxation below exists for one of those needs,
+# fastapi.tiangolo.com. With dev tools open, Chromium-based browsers also
+# fetch the CDN assets' source maps - a connect-src fetch that would log a
+# console CSP violation. Each relaxation below exists for one of those needs,
 # and applies to /docs alone. Derived from the strict policy instead of
 # hand-written, so every directive not named here can't drift apart
 # (tests/test_security_headers.py enforces the exact delta).
@@ -95,6 +101,10 @@ DOCS_CSP = (
     .replace(
         "style-src 'self'",
         "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+    )
+    .replace(
+        "connect-src 'self'",
+        "connect-src 'self' https://cdn.jsdelivr.net",
     )
     .replace("img-src 'self'", "img-src 'self' data: https://fastapi.tiangolo.com")
 )
@@ -168,6 +178,27 @@ async def health() -> dict[str, str]:
 async def shout(payload: ShoutPayload) -> ShoutReply:
     """Reply with the text uppercased - the frontend's example API round trip."""
     return ShoutReply(text=payload.text.upper())
+
+
+@fastapi_app.exception_handler(StarletteHTTPException)
+async def branded_404(request: Request, exc: StarletteHTTPException) -> Response:
+    """
+    Serve the branded 404 page for any 404 outside /api; else unchanged.
+
+    StaticFiles raises HTTPException(404) for unknown paths, so this catches
+    misses from the mount below as well as unmatched routes. /api keeps
+    FastAPI's default JSON errors - browsers get a page, API clients get JSON.
+    The 404 status is preserved: a "soft 404" (page with a 200) would make
+    broken links look healthy to crawlers and monitoring.
+
+    The page is deliberately NOT named 404.html: StaticFiles(html=True)
+    special-cases that filename and would serve it for every miss itself -
+    including /api/* misses, which must stay JSON and never reach this
+    handler's check.
+    """
+    if exc.status_code == 404 and not request.url.path.startswith("/api/"):
+        return FileResponse(STATIC_DIR / "not-found.html", status_code=404)
+    return await http_exception_handler(request, exc)
 
 
 # Mounted last so /api routes take precedence over static files.

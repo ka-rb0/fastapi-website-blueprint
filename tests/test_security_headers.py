@@ -37,9 +37,9 @@ def _directives(csp: str) -> dict[str, str]:
     return dict(directive.split(" ", 1) for directive in csp.split("; "))
 
 
-def test_docs_csp_relaxes_exactly_scripts_styles_and_images() -> None:
+def test_docs_csp_relaxes_exactly_scripts_styles_connects_and_images() -> None:
     """
-    DOCS_CSP is the strict CSP with exactly three directives loosened.
+    DOCS_CSP is the strict CSP with exactly four directives loosened.
 
     Guards the .replace() derivation in app.main: if the strict policy were
     reworded, a silently no-op replace would ship the strict CSP to /docs
@@ -50,8 +50,9 @@ def test_docs_csp_relaxes_exactly_scripts_styles_and_images() -> None:
     cdn = "'self' 'unsafe-inline' https://cdn.jsdelivr.net"
     assert docs.pop("script-src") == cdn
     assert docs.pop("style-src") == cdn
+    assert docs.pop("connect-src") == "'self' https://cdn.jsdelivr.net"
     assert docs.pop("img-src") == "'self' data: https://fastapi.tiangolo.com"
-    del base["script-src"], base["style-src"], base["img-src"]
+    del base["script-src"], base["style-src"], base["connect-src"], base["img-src"]
     assert docs == base
 
 

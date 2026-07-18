@@ -46,6 +46,23 @@ def test_shout_rejects_oversized_text(server: str) -> None:
     assert excinfo.value.code == 422
 
 
+def test_unknown_path_serves_404_page(server: str) -> None:
+    """Unknown non-API paths get the branded 404 page - with a real 404 status."""
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        urllib.request.urlopen(f"{server}/no-such-page", timeout=5)
+    assert excinfo.value.code == 404
+    assert excinfo.value.headers["Content-Type"].startswith("text/html")
+    assert "<h1>Page not found</h1>" in excinfo.value.read().decode()
+
+
+def test_unknown_api_path_stays_json(server: str) -> None:
+    """API clients keep getting JSON 404s, not the HTML page."""
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        urllib.request.urlopen(f"{server}/api/no-such-endpoint", timeout=5)
+    assert excinfo.value.code == 404
+    assert excinfo.value.headers["Content-Type"] == "application/json"
+
+
 @pytest.mark.parametrize("path", ["/", "/api/health"])
 def test_security_headers(server: str, path: str) -> None:
     """

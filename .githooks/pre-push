@@ -1,25 +1,27 @@
 #!/bin/sh
-# Blocks a push to main unless the checks CI runs (see
+# Blocks a push to any branch unless the checks CI runs (see
 # .github/workflows/ci.yml) pass locally: scripts/lint + scripts/test.
 # The CI security audits (pip-audit, npm audit, zizmor) are not run here -
-# they need network access. Pushes to other branches are not guarded - CI
-# covers them via pull_request.
+# they need network access. Deletion-only pushes are not guarded - there is
+# nothing new to check.
 #
 # Committed hooks are not active by default; activate once per clone with:
 #   git config core.hooksPath .githooks
 #
 # Emergency bypass (use sparingly): git push --no-verify
 
+zero_sha="0000000000000000000000000000000000000000"
+
 # stdin: one line per ref being pushed: <local ref> <local sha> <remote ref> <remote sha>
-pushing_main=""
-while read -r _local_ref _local_sha remote_ref _remote_sha; do
-  if [ "$remote_ref" = "refs/heads/main" ]; then
-    pushing_main=1
+pushing_commits=""
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  if [ "$local_sha" != "$zero_sha" ]; then
+    pushing_commits=1
   fi
 done
-[ -z "$pushing_main" ] && exit 0
+[ -z "$pushing_commits" ] && exit 0
 
-echo "pre-push: push targets main - running scripts/lint + scripts/test (bypass: --no-verify)"
+echo "pre-push: running scripts/lint + scripts/test (bypass: --no-verify)"
 
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
@@ -27,10 +29,10 @@ cd "$(git rev-parse --show-toplevel)" || exit 1
 # slower test suite only runs once lint is clean.
 if ! scripts/lint || ! scripts/test; then
   echo ""
-  echo "pre-push: checks failed - push to main aborted." >&2
+  echo "pre-push: checks failed - push aborted." >&2
   exit 1
 fi
 
 echo ""
-echo "pre-push: all checks passed - pushing to main."
+echo "pre-push: all checks passed - pushing."
 exit 0

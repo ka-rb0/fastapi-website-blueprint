@@ -1,43 +1,29 @@
 // ESLint flat config for the vanilla-JS frontend (src/app/static/js) plus
 // root-level ESM like this config file itself.
 //
-// Deliberately import-free: the devcontainer images run eslint from a fixed
-// prefix outside /workspace (see docker_files/02_dev/Dockerfile), where an
-// import like @eslint/js would not resolve. Instead the correctness rules we
-// care about are listed explicitly. Run with:  eslint .  (on PATH in the
-// devcontainer; `npm ci && npx eslint .` in CI - versions come from
-// package-lock.json either way).
+// Run with:  eslint .  (on PATH in the devcontainer; `npm ci && npx eslint .`
+// in CI - versions come from package-lock.json either way).
+import { createRequire } from "node:module";
+
+// createRequire honors NODE_PATH, which the dev image points at its baked-in
+// npm tools. In a normal clone or CI it resolves the same locked package from
+// the workspace's node_modules directory.
+const require = createRequire(import.meta.url);
+const js = require("@eslint/js");
 
 // One rule set for every block below, so frontend code and root scripts are
-// held to the same standard.
-const rules = {
+// held to the same standard. js.configs.recommended provides the baseline;
+// these only add rules that go beyond it.
+const stricterRules = {
   // correctness
-  "no-undef": "error",
-  "no-unused-vars": "error",
-  "no-redeclare": "error",
   "no-shadow": "error",
   "no-use-before-define": ["error", { functions: false }],
-  "no-unreachable": "error",
-  "no-dupe-keys": "error",
-  "no-dupe-args": "error",
-  "no-duplicate-case": "error",
-  "no-unsafe-negation": "error",
-  "no-self-assign": "error",
   "no-self-compare": "error",
-  "no-cond-assign": "error",
-  "no-constant-condition": "error",
-  "no-constant-binary-expression": "error",
-  "no-fallthrough": "error",
-  "no-sparse-arrays": "error",
   "no-template-curly-in-string": "error",
-  "valid-typeof": "error",
-  "use-isnan": "error",
   "array-callback-return": "error",
   "no-promise-executor-return": "error",
   "require-atomic-updates": "error",
   eqeqeq: "error",
-  // an empty catch must carry a comment saying why it's fine
-  "no-empty": "error",
   // hygiene
   "no-var": "error",
   "prefer-const": "error",
@@ -58,7 +44,7 @@ export default [
       ecmaVersion: "latest",
       sourceType: "module",
     },
-    rules,
+    rules: { ...js.configs.recommended.rules, ...stricterRules },
   },
   {
     files: ["src/app/static/js/**/*.js"],
@@ -73,7 +59,7 @@ export default [
         console: "readonly",
       },
     },
-    rules,
+    rules: { ...js.configs.recommended.rules, ...stricterRules },
   },
   {
     // theme-init.js is loaded as a classic blocking script, not a module

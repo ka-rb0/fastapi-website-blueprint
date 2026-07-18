@@ -17,8 +17,12 @@ cd "$(dirname -- "$0")/.." || exit 1
 PATH="$PWD/node_modules/.bin:$PATH"
 
 require_npm_tools() {
-  if ! command -v prettier >/dev/null 2>&1; then
-    echo "$script_name: npm tools not on PATH - run 'npm ci' first" \
+  missing=""
+  for tool in prettier eslint markdownlint-cli2; do
+    command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+  done
+  if [ -n "$missing" ]; then
+    echo "$script_name: not on PATH:$missing - run 'npm ci' first" \
       "(the devcontainer bakes them in)." >&2
     exit 1
   fi

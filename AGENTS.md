@@ -25,7 +25,7 @@ See [README.md](README.md) for the full feature description.
 - `scripts/lint` - every lint/format/type check in one run; keeps going on
   failure and summarizes, so one run shows everything that is wrong
 - `scripts/fix` - every auto-fixer in one run
-- `scripts/test` - the full test suite, exactly as CI runs it
+- `scripts/test` - the full test suite (the same pytest invocation CI uses)
 
 Run these before declaring work done. Individual per-tool commands are in
 [docs/CHEATSHEET.md](docs/CHEATSHEET.md).

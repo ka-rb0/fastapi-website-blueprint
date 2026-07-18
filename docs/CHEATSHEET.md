@@ -5,7 +5,8 @@
 - `scripts/lint` <- every check in one run; keeps going on failure and
   summarizes at the end, so one run shows everything that is wrong
 - `scripts/fix` <- every auto-fixer in one run
-- `scripts/test` <- the full test suite with enforced coverage, as CI runs it
+- `scripts/test` <- the full test suite with enforced coverage (the same
+  pytest invocation CI uses)
 
 The sections below run the same tools one at a time.
 

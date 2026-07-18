@@ -63,7 +63,7 @@ one run shows everything that is wrong):
 ```sh
 scripts/lint  # every check below in one run
 scripts/fix   # every auto-fixer in one run
-scripts/test  # the full test suite with enforced coverage, as CI runs it
+scripts/test  # the full test suite with enforced coverage (CI's pytest call)
 ```
 
 Individual tools:

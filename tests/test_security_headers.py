@@ -14,7 +14,13 @@ import pytest
 from starlette.middleware.errors import ServerErrorMiddleware
 from starlette.types import Message, Receive, Scope, Send
 
-from app.main import SECURITY_HEADERS, SecurityHeadersMiddleware, app, fastapi_app
+from app.main import (
+    DOCS_CSP,
+    SECURITY_HEADERS,
+    SecurityHeadersMiddleware,
+    app,
+    fastapi_app,
+)
 
 
 def test_app_is_wrapped_outside_the_framework() -> None:
@@ -25,6 +31,28 @@ def test_app_is_wrapped_outside_the_framework() -> None:
     """
     assert isinstance(app, SecurityHeadersMiddleware)
     assert app.app is fastapi_app
+
+
+def _directives(csp: str) -> dict[str, str]:
+    return dict(directive.split(" ", 1) for directive in csp.split("; "))
+
+
+def test_docs_csp_relaxes_exactly_scripts_styles_and_images() -> None:
+    """
+    DOCS_CSP is the strict CSP with exactly three directives loosened.
+
+    Guards the .replace() derivation in app.main: if the strict policy were
+    reworded, a silently no-op replace would ship the strict CSP to /docs
+    (blank page) - and nothing else may ever diverge between the two.
+    """
+    base = _directives(SECURITY_HEADERS["Content-Security-Policy"])
+    docs = _directives(DOCS_CSP)
+    cdn = "'self' 'unsafe-inline' https://cdn.jsdelivr.net"
+    assert docs.pop("script-src") == cdn
+    assert docs.pop("style-src") == cdn
+    assert docs.pop("img-src") == "'self' data: https://fastapi.tiangolo.com"
+    del base["script-src"], base["style-src"], base["img-src"]
+    assert docs == base
 
 
 async def _crashing_app(scope: Scope, receive: Receive, send: Send) -> None:

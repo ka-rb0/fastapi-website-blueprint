@@ -33,7 +33,20 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-fastapi_app = FastAPI(title="FastAPI Website Blueprint", lifespan=lifespan)
+# The interactive API docs are a development tool: /docs only exists when
+# WEBSITE_ENABLE_DOCS=1 (the devcontainer sets it; production should not).
+# The page needs CSP exceptions - see DOCS_CSP below - so keeping it out of
+# production also keeps production on the strict policy everywhere.
+DOCS_ENABLED = os.environ.get("WEBSITE_ENABLE_DOCS") == "1"
+
+fastapi_app = FastAPI(
+    title="FastAPI Website Blueprint",
+    lifespan=lifespan,
+    docs_url="/docs" if DOCS_ENABLED else None,
+    # No ReDoc: one docs UI is enough, and each one is its own set of CSP
+    # exceptions. The schema itself stays at the default /openapi.json.
+    redoc_url=None,
+)
 
 # Defense-in-depth headers on every response (static files and API alike).
 # The CSP allows only same-origin resources, which matches the self-contained
@@ -65,10 +78,34 @@ SECURITY_HEADERS = {
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
 }
 
+# The one exception to the strict CSP - and the pattern to copy when a page
+# of yours needs one. FastAPI's generated /docs page loads Swagger UI from
+# cdn.jsdelivr.net, boots it with an inline script, and the UI injects inline
+# styles and data: images while rendering; its favicon comes from
+# fastapi.tiangolo.com. Each relaxation below exists for one of those needs,
+# and applies to /docs alone. Derived from the strict policy instead of
+# hand-written, so every directive not named here can't drift apart
+# (tests/test_security_headers.py enforces the exact delta).
+DOCS_CSP = (
+    SECURITY_HEADERS["Content-Security-Policy"]
+    .replace(
+        "script-src 'self'",
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+    )
+    .replace(
+        "style-src 'self'",
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+    )
+    .replace("img-src 'self'", "img-src 'self' data: https://fastapi.tiangolo.com")
+)
+
 
 class SecurityHeadersMiddleware:
     """
     Pure ASGI wrapper stamping SECURITY_HEADERS on every HTTP response.
+
+    When the docs are enabled, responses under /docs carry DOCS_CSP instead
+    of the strict CSP; every other header is identical.
 
     Deliberately not @app.middleware("http") / add_middleware: Starlette puts
     user middleware *inside* its outermost ServerErrorMiddleware, so the 500
@@ -87,9 +124,15 @@ class SecurityHeadersMiddleware:
             await self.app(scope, receive, send)
             return
 
+        path = scope["path"]
+        is_docs = DOCS_ENABLED and (path == "/docs" or path.startswith("/docs/"))
+
         async def send_with_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
-                MutableHeaders(scope=message).update(SECURITY_HEADERS)
+                headers = MutableHeaders(scope=message)
+                headers.update(SECURITY_HEADERS)
+                if is_docs:
+                    headers["Content-Security-Policy"] = DOCS_CSP
             await send(message)
 
         await self.app(scope, receive, send_with_headers)

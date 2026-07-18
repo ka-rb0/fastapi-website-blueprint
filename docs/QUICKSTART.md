@@ -10,6 +10,9 @@ uvicorn app.main:app --host 0.0.0.0 --port $WEBSITE_INTERNAL_PORT --reload
 
 - Go to `http://localhost:$WEBSITE_EXTERNAL_PORT`
   - e.g. <http://localhost:11110/>
+- Interactive API docs (Swagger UI): `http://localhost:$WEBSITE_EXTERNAL_PORT/docs`
+  - A dev tool: only served when `WEBSITE_ENABLE_DOCS=1`, which the dev
+    container sets by default - don't set it in production
 - To preview different screen sizes, press `Ctrl+Shift+M` in the browser's
   developer tools
 

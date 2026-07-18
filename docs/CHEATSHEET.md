@@ -9,6 +9,8 @@
 - `uv lock --upgrade` <- refresh uv.lock to the latest versions by hand
   (Dependabot does this weekly)
 - `npm ci` <- prettier + eslint at the exact versions in package-lock.json
+  (only needed outside the devcontainer - the dev image bakes the tools into
+  /opt/npm-tools and puts them on PATH, so `/workspace/node_modules` stays empty)
 
 ## Run Server
 

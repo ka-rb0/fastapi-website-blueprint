@@ -30,4 +30,5 @@ See [README.md](README.md) for the full feature description.
   ones CI runs); run it when you touch dependencies or workflows
 
 Run `scripts/lint` and `scripts/test` before declaring work done.
-Individual per-tool commands are in [docs/CHEATSHEET.md](docs/CHEATSHEET.md).
+
+Commands not used daily are in [docs/CHEATSHEET.md](docs/CHEATSHEET.md).

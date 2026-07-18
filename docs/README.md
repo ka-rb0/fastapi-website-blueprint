@@ -1,6 +1,7 @@
 # Documentation
 
 - [Quickstart](QUICKSTART.md)
+- [Test & Lint](TEST_AND_LINT.md)
 - [Cheatsheet](CHEATSHEET.md)
 - [GitHub Setup](GITHUB_SETUP.md)
 

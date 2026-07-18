@@ -1,6 +1,7 @@
 #!/bin/sh
 # The security audits that need network access, in one run - the same ones
-# CI runs (see .github/workflows/ci.yml): pip-audit and npm audit check the
+# CI runs (on push/PR in ci.yml, weekly on a schedule in audit.yml):
+# pip-audit and npm audit check the
 # locked dependencies against the public advisory databases; zizmor's online
 # audits go beyond the offline run in scripts/lint (they need GH_TOKEN -
 # without one, zizmor falls back to offline mode with a warning).

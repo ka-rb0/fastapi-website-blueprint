@@ -7,7 +7,7 @@
 
 ## Resources
 
-- [Projects Readme](../README.md)
+- [Project README](../README.md)
 - [Contributing](../CONTRIBUTING.md)
 - [Security policy](../SECURITY.md)
 - [Pull request template](../.github/pull_request_template.md)

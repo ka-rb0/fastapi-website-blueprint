@@ -8,17 +8,11 @@ FROM python:3.14-slim@sha256:d3400aa122fa42cf0af0dbe8ec3091b047eac5c8f7e3539f713
 
 COPY --from=uv /uv /uvx /usr/local/bin/
 
-# ARG, not ENV: apt stays non-interactive during this build only, and nothing
-# leaks into the final image or its children.
-ARG DEBIAN_FRONTEND=noninteractive
-
-# Update apt packages. Clean up in the same RUN: a later layer can't shrink
-# this one, so the package lists must never be committed to it.
-RUN apt-get update \
-    && apt-get full-upgrade -y \
-    && apt-get autoremove -y \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+# Deliberately no `apt-get full-upgrade` here: the digest above is the single
+# source of this image's package versions, so builds stay reproducible.
+# Debian security patches arrive as Dependabot digest bumps (upstream rebuilds
+# the python images on base-image updates) instead of drifting in unpinned at
+# build time - merge those weekly PRs promptly.
 
 # Install the runtime python packages at the exact versions in uv.lock (the
 # single source of truth) into the system interpreter - no venv indirection

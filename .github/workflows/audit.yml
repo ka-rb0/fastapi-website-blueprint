@@ -24,10 +24,10 @@ on:
   # Manual runs from the Actions tab, e.g. to confirm a fix for a finding.
   workflow_dispatch:
 
-# a manual run supersedes a scheduled run still in flight
+# A manual run supersedes a scheduled run still in flight (scheduled runs queue).
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' }}
 
 # The audits only read the repo - grant the workflow token the minimum
 permissions:

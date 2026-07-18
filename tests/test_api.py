@@ -55,10 +55,11 @@ def test_unknown_path_serves_404_page(server: str) -> None:
     assert "<h1>Page not found</h1>" in excinfo.value.read().decode()
 
 
-def test_unknown_api_path_stays_json(server: str) -> None:
-    """API clients keep getting JSON 404s, not the HTML page."""
+@pytest.mark.parametrize("path", ["/api", "/api/", "/api/no-such-endpoint"])
+def test_unknown_api_path_stays_json(server: str, path: str) -> None:
+    """API clients keep getting JSON 404s, not the HTML page - bare /api included."""
     with pytest.raises(urllib.error.HTTPError) as excinfo:
-        urllib.request.urlopen(f"{server}/api/no-such-endpoint", timeout=5)
+        urllib.request.urlopen(f"{server}{path}", timeout=5)
     assert excinfo.value.code == 404
     assert excinfo.value.headers["Content-Type"] == "application/json"
 

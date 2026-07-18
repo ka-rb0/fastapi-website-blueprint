@@ -196,7 +196,8 @@ async def branded_404(request: Request, exc: StarletteHTTPException) -> Response
     including /api/* misses, which must stay JSON and never reach this
     handler's check.
     """
-    if exc.status_code == 404 and not request.url.path.startswith("/api/"):
+    path = request.url.path
+    if exc.status_code == 404 and path != "/api" and not path.startswith("/api/"):
         return FileResponse(STATIC_DIR / "not-found.html", status_code=404)
     return await http_exception_handler(request, exc)
 

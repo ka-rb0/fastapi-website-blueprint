@@ -3,6 +3,7 @@
 # (the Python version convention, machine-readable) for tools that read it.
 name = "fastapi-website-blueprint"
 version = "0.1.0"
+description = "A FastAPI-based blueprint for a modern, minimalist website with light and dark themes."
 requires-python = "==3.14.*"
 license = "MIT"  # PEP 639 license expression
 license-files = ["LICENSE"]

@@ -1,9 +1,10 @@
 #!/bin/sh
 # Blocks a push to any branch unless the checks CI runs (see
 # .github/workflows/ci.yml) pass locally: scripts/lint + scripts/test.
-# The CI security audits (pip-audit, npm audit, zizmor) are not run here -
-# they need network access. Tag pushes and deletion-only pushes are not
-# guarded - they introduce no new code to check.
+# The security audits that need network access (pip-audit, npm audit,
+# zizmor's online audits) are not run here - run scripts/audit for those.
+# Tag pushes and deletion-only pushes are not guarded - they introduce no
+# new code to check.
 #
 # Committed hooks are not active by default; activate once per clone with:
 #   git config core.hooksPath .githooks

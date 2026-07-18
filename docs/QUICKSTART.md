@@ -15,6 +15,9 @@ uvicorn app.main:app --host 0.0.0.0 --port $WEBSITE_INTERNAL_PORT --reload
 
 ## Other commands
 
+- [Test & Lint](TEST_AND_LINT.md)
+- [Cheatsheet](CHEATSHEET.md)
+
 ### Normalize line endings to LF
 
 - `fdfind --type file --exec dos2unix {}`

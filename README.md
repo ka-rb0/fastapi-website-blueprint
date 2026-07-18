@@ -20,10 +20,6 @@ dark themes.
   response, and security scanning in CI (pip-audit, npm audit, zizmor,
   CodeQL, dependency review).
 
-## URLs
-
-- [GitHub Repository](https://github.com/ka-rb0/fastapi-website-blueprint)
-
 ## Overview
 
 The entire project, including its development environment, is containerized.
@@ -35,7 +31,8 @@ and modify anything inside the ephemeral container as they please.
 
 ## Commands
 
-For a list of common commands, see [CHEATSHEET.md](docs/CHEATSHEET.md).
+- For a list of common commands, see [CHEATSHEET.md](docs/CHEATSHEET.md).
+- [Test & Lint](docs/TEST_AND_LINT.md)
 
 ## Dependencies
 
@@ -55,34 +52,14 @@ The devcontainer images bake everything in, and Dependabot
 ([dependabot.yml](.github/dependabot.yml)) sends weekly PRs to keep all of
 the pins current.
 
-## Tests & linting
-
-One-shot wrappers (`scripts/lint` keeps going on failure and summarizes, so
-one run shows everything that is wrong):
-
-```sh
-scripts/lint  # every check below in one run
-scripts/fix   # every auto-fixer in one run
-scripts/test  # the full test suite with enforced coverage (CI's pytest call)
-```
-
-Individual tools:
-
-```sh
-pytest  # from the repo root: API tests + Playwright E2E
-ruff check . && ruff format --check .
-mypy
-eslint .
-prettier --check .  # respects .gitignore
-markdownlint-cli2  # globs + rule tweaks in .markdownlint-cli2.jsonc
-codespell .  # skip list in [tool.codespell] in pyproject.toml
-zizmor .github/workflows/  # security lint of the CI workflows
-```
-
 ## Extras
 
 - [For Agents & AI Assistants](AGENTS.md)
 - [Documentation](docs/README.md)
+
+## URLs
+
+- [GitHub Repository](https://github.com/ka-rb0/fastapi-website-blueprint)
 
 ## License
 

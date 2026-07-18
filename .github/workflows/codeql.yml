@@ -14,6 +14,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Only matters if a repo built from this template makes CodeQL a required
+  # check and enables GitHub's merge queue - same reasoning as in ci.yml.
+  merge_group:
   schedule:
     # Weekly re-scan: CodeQL's query packs improve continuously, so unchanged
     # code can grow new findings between pushes.

@@ -65,6 +65,8 @@ extend-select = [
   "PIE",   # https://docs.astral.sh/ruff/rules/#flake8-pie-pie
   "S",     # Security checks (bandit rules)
   "T20",   # don't allow print statements
+  "RUF",   # ruff-native rules (unused noqa, ambiguous unicode, ...)
+  "SIM",   # flake8-simplify: collapsible ifs, needless bools, ...
   #"PT",    # Pytest checks (consider enabling it soon)
   #"EM",    # https://docs.astral.sh/ruff/rules/#flake8-errmsg-em
   #"PL",    # Pylint rules (if you want even more strictness)

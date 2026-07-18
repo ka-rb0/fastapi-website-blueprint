@@ -16,12 +16,12 @@ license-files = ["LICENSE"]
 # itself needs.
 runtime = [
   "pydantic>=2.13.4",
-  "fastapi>=0.139.1",
+  "fastapi>=0.139.2",
   "uvicorn[standard]>=0.51.0",
 ]
 lint = [
   "codespell>=2.4.2",
-  "ruff>=0.15.21",
+  "ruff>=0.15.22",
   # pip-audit checks the locked python packages against known-CVE databases
   "pip-audit>=2.9.0",
   # zizmor lints the GitHub Actions workflows for security footguns

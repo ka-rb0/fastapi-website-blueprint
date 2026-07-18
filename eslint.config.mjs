@@ -1,5 +1,5 @@
 // ESLint flat config for the vanilla-JS frontend (src/app/static/js) plus
-// root-level ESM like this config file itself.
+// any Node-side JS in the repo (this config file, future scripts).
 //
 // Run with:  eslint .  (on PATH in the devcontainer; `npm ci && npx eslint .`
 // in CI - versions come from package-lock.json either way).
@@ -10,6 +10,7 @@ import { createRequire } from "node:module";
 // the workspace's node_modules directory.
 const require = createRequire(import.meta.url);
 const js = require("@eslint/js");
+const { defineConfig } = require("eslint/config");
 
 // One rule set for every block below, so frontend code and root scripts are
 // held to the same standard. js.configs.recommended provides the baseline;
@@ -34,15 +35,38 @@ const stricterRules = {
   "no-implied-eval": "error",
 };
 
-export default [
+export default defineConfig([
   // node_modules is ignored by default; the venv `uv sync` creates is not
   { ignores: [".venv/"] },
   {
-    // root-level ESM (this config file, future scripts) - no browser globals
-    files: ["*.mjs"],
+    // .mjs anywhere (this config file, future scripts) - Node context, no
+    // browser globals
+    files: ["**/*.mjs"],
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "module",
+    },
+    rules: { ...js.configs.recommended.rules, ...stricterRules },
+  },
+  {
+    // .js/.cjs outside the frontend dir: Node CommonJS (package.json has no
+    // "type": "module"). Without this block such files would match nothing
+    // and be silently skipped by flat config.
+    files: ["**/*.js", "**/*.cjs"],
+    ignores: ["src/app/static/js/**"],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "commonjs",
+      // only what scripts plausibly use - extend as needed
+      globals: {
+        require: "readonly",
+        module: "writable",
+        exports: "writable",
+        process: "readonly",
+        console: "readonly",
+        __dirname: "readonly",
+        __filename: "readonly",
+      },
     },
     rules: { ...js.configs.recommended.rules, ...stricterRules },
   },
@@ -72,4 +96,4 @@ export default [
       sourceType: "script",
     },
   },
-];
+]);

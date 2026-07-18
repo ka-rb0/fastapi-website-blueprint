@@ -1,0 +1,4 @@
+# Allowlist like the root .dockerignore: Dockerfile.master COPYs nothing, so
+# nothing from this context needs to reach the daemon - keeps .env (local
+# secrets) out of the build even if a future COPY is added.
+*

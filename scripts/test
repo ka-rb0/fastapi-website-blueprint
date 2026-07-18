@@ -1,0 +1,9 @@
+#!/bin/sh
+# The full test suite, exactly as CI runs it: API tests + Playwright E2E
+# against a live uvicorn server, with coverage measured and enforced
+# ([tool.coverage.*] in pyproject.toml is the single source of truth).
+. "$(dirname -- "$0")/lib.sh"
+
+check uv run pytest --cov
+
+summary

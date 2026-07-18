@@ -1,8 +1,9 @@
 #!/bin/sh
-# Blocks a push to main unless the lint + test checks CI runs (see
-# .github/workflows/ci.yml) pass locally. The CI security audits (pip-audit,
-# npm audit, zizmor) are not run here - they need network access. Pushes to
-# other branches are not guarded - CI covers them via pull_request.
+# Blocks a push to main unless the checks CI runs (see
+# .github/workflows/ci.yml) pass locally: scripts/lint + scripts/test.
+# The CI security audits (pip-audit, npm audit, zizmor) are not run here -
+# they need network access. Pushes to other branches are not guarded - CI
+# covers them via pull_request.
 #
 # Committed hooks are not active by default; activate once per clone with:
 #   git config core.hooksPath .githooks
@@ -18,43 +19,17 @@ while read -r _local_ref _local_sha remote_ref _remote_sha; do
 done
 [ -z "$pushing_main" ] && exit 0
 
-echo "pre-push: push targets main - running lint + tests (bypass: --no-verify)"
-
-fail() {
-  echo ""
-  echo "pre-push: '$1' failed - push to main aborted." >&2
-  exit 1
-}
-
-run() {
-  echo ""
-  echo "pre-push: $*"
-  "$@" || fail "$*"
-}
+echo "pre-push: push targets main - running scripts/lint + scripts/test (bypass: --no-verify)"
 
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
-# Bare tool names, not npx: npx ignores PATH, so with an empty ./node_modules
-# (the devcontainer case - the tools are baked into the image at the locked
-# versions) it would silently network-install an *unpinned* version instead.
-# Prepending ./node_modules/.bin covers clones outside the devcontainer that
-# installed the locked tools with `npm ci`; in the devcontainer the empty
-# entry falls through to the baked-in tools already on PATH.
-PATH="$PWD/node_modules/.bin:$PATH"
-if ! command -v prettier >/dev/null 2>&1; then
-  echo "pre-push: npm tools not on PATH - run 'npm ci' first" \
-    "(the devcontainer bakes them in). Push to main aborted." >&2
+# scripts/lint keeps going and reports everything wrong in one pass; the
+# slower test suite only runs once lint is clean.
+if ! scripts/lint || ! scripts/test; then
+  echo ""
+  echo "pre-push: checks failed - push to main aborted." >&2
   exit 1
 fi
-
-run uv run ruff check .
-run uv run ruff format --check .
-run uv run codespell .
-run prettier --check .
-run eslint .
-run markdownlint-cli2
-run uv run mypy
-run uv run pytest --cov
 
 echo ""
 echo "pre-push: all checks passed - pushing to main."

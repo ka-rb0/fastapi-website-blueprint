@@ -3,9 +3,8 @@
 
 ## Checklist
 
-- [ ] `pytest` passes
-- [ ] Lint passes (`ruff check .`, `ruff format --check .`, `codespell .`,
-      `prettier --check .`, `eslint .`, `markdownlint-cli2`, `mypy` - the
-      pre-push hook runs all of these)
+- [ ] `scripts/test` passes (pytest + enforced coverage)
+- [ ] `scripts/lint` passes (ruff, codespell, prettier, eslint,
+      markdownlint, mypy - the pre-push hook runs both scripts)
 - [ ] New or changed behavior is covered by test(s)
 - [ ] Docs updated if commands or setup changed

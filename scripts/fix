@@ -1,0 +1,15 @@
+#!/bin/sh
+# Every auto-fixer in one run - the fixable subset of what scripts/lint
+# checks. Neither CI nor the pre-push hook runs this: fixing is a
+# working-tree action, gates only check.
+. "$(dirname -- "$0")/lib.sh"
+
+require_npm_tools
+
+check uv run ruff check --fix .
+check uv run ruff format .
+check prettier --write .
+check eslint --fix .
+check markdownlint-cli2 --fix
+
+summary

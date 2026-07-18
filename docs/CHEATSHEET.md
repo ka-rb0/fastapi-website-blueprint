@@ -1,5 +1,14 @@
 # Commands
 
+## Run everything
+
+- `scripts/lint` <- every check in one run; keeps going on failure and
+  summarizes at the end, so one run shows everything that is wrong
+- `scripts/fix` <- every auto-fixer in one run
+- `scripts/test` <- the full test suite with enforced coverage, as CI runs it
+
+The sections below run the same tools one at a time.
+
 ## Dependencies
 
 - `uv sync` <- everything in the dev group of pyproject.toml, at the exact
@@ -67,8 +76,8 @@
 
 ## Git hooks
 
-- `.githooks/pre-push` blocks any push to main unless the full CI suite
-  (lint + tests) passes locally. The devcontainer activates it automatically
+- `.githooks/pre-push` blocks any push to main unless `scripts/lint` and
+  `scripts/test` pass locally. The devcontainer activates it automatically
   (postCreateCommand in devcontainer.json).
 - `git config core.hooksPath .githooks` <- one-time manual activation for
   clones used outside the devcontainer

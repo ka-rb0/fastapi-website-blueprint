@@ -1,0 +1,79 @@
+# Re-runs the security audits on a weekly schedule: advisories are published
+# on their own clock, not the repo's push cadence, so a repo with no pushes
+# would otherwise never learn that a *currently pinned* dependency has a
+# known vulnerability. Same audit steps as ci.yml's lint job - keep the two
+# lists in sync. Complements the Dependabot alerts described in
+# docs/GITHUB_SETUP.md: alerts cover GitHub's advisory database, pip-audit
+# additionally queries PyPA's, and zizmor's online audits check the
+# workflows themselves.
+#
+# Same pinning rules as ci.yml: actions pinned to commit SHAs, kept current
+# by Dependabot.
+#
+# GitHub auto-disables scheduled workflows in public repos after 60 days
+# without repo activity - the weekly Dependabot PRs normally count as
+# activity, but if the schedule does get disabled, re-enable it in the
+# Actions tab.
+name: Audit
+
+on:
+  schedule:
+    # Weekly re-audit; timed off the top of the hour, like codeql.yml, to
+    # avoid GitHub's cron load spikes.
+    - cron: "23 4 * * 1"
+  # Manual runs from the Actions tab, e.g. to confirm a fix for a finding.
+  workflow_dispatch:
+
+# A manual run supersedes a scheduled run still in flight (scheduled runs queue).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' }}
+
+# The audits only read the repo - grant the workflow token the minimum
+permissions:
+  contents: read
+
+env:
+  # Same reasoning as ci.yml: without this, `uv run` would implicitly sync
+  # the default (dev) group, undoing the `--only-group lint` install.
+  UV_NO_SYNC: "1"
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # don't leave the workflow token in .git/config for later steps
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version-file: pyproject.toml
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: true
+      # pip-audit and zizmor live in the lint dependency group
+      - name: Install audit tools
+        run: uv sync --locked --only-group lint
+      # engines.node in package.json pins the npm doing the auditing. No
+      # `npm ci`: npm audit reads package-lock.json, node_modules not needed.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+      # npm audit checks package-lock.json against the npm advisory database.
+      - name: npm audit
+        run: npm audit --audit-level=high
+      # pip-audit checks the locked python packages against the PyPA advisory
+      # database - same uv export flattening as in ci.yml.
+      - name: pip-audit
+        run: |
+          uv export --format requirements-txt --all-groups --no-emit-project \
+            --output-file "$RUNNER_TEMP/requirements.txt"
+          uv run pip-audit --disable-pip -r "$RUNNER_TEMP/requirements.txt"
+      # zizmor's online audits go beyond the offline run in scripts/lint.
+      # GH_TOKEN only enables those extra audits - read-only is plenty.
+      - name: zizmor
+        run: uv run zizmor .github/workflows/
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

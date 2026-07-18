@@ -61,3 +61,6 @@ exists - but they are only free on public repos:
 
 The other CI audits (`pip-audit`, `npm audit`, `zizmor`) query public
 advisory databases and are free everywhere - keep them.
+[audit.yml](../.github/workflows/audit.yml) re-runs those audits on a weekly
+schedule, so advisories published between pushes still surface; it is also
+free everywhere.

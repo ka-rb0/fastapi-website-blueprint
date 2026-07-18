@@ -83,7 +83,9 @@ jobs:
         run: npx markdownlint-cli2
       # ---- security audits -----------------------------------------------
       # Dependabot keeps the pins current; these steps fail the build when a
-      # *currently pinned* dependency has a known vulnerability.
+      # *currently pinned* dependency has a known vulnerability. audit.yml
+      # re-runs the same audits on a weekly schedule, so advisories published
+      # between pushes still surface - keep the two lists in sync.
       # npm audit checks package-lock.json against the npm advisory database.
       - name: npm audit
         run: npm audit --audit-level=high

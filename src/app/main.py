@@ -76,10 +76,16 @@ SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     # Legacy complement to the CSP's frame-ancestors for pre-CSP2 browsers.
     "X-Frame-Options": "DENY",
-    "Referrer-Policy": "same-origin",
-    # No cross-window handles on this site from cross-origin openers, and no
-    # cross-origin embedding of this site's resources.
+    # The modern browser default, made explicit for older browsers whose
+    # default (no-referrer-when-downgrade) leaks full URLs cross-origin.
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    # A cross-origin page that opened this site (or was opened by it) gets no
+    # window handle: logged-in pages can't be tab-nabbed or probed for
+    # XS-Leaks through window.opener.
     "Cross-Origin-Opener-Policy": "same-origin",
+    # No cross-origin embedding of this site's responses: authenticated,
+    # per-user data can't be pulled into another origin's process via
+    # <img>/<script> inclusion (Spectre-class side channels).
     "Cross-Origin-Resource-Policy": "same-origin",
     # The frontend uses none of these; opt out so embedded content can't either.
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",

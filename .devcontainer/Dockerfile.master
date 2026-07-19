@@ -1,5 +1,0 @@
-FROM fastapi-website-blueprint-agent-image
-
-# No "${PYTHONPATH}:" prefix: the base image doesn't set PYTHONPATH, and an
-# empty leading entry would put the current working directory on sys.path.
-ENV PYTHONPATH=/workspace/src

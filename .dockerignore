@@ -6,5 +6,7 @@
 !uv.lock
 !package.json
 !package-lock.json
-!src/app
-src/app/**/__pycache__
+!src/
+!src/app/
+!src/app/**
+src/app/**/__pycache__/

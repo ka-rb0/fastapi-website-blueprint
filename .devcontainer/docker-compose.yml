@@ -1,8 +1,11 @@
 services:
   master:
     build:
-      context: ./
-      dockerfile: Dockerfile.master
+      # Build from the repo root so the lockfiles are available, and stop at
+      # the desktop agent stage. The distribution branch is not built.
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+      target: agent
     # A real PID 1 that reaps orphans - `sleep infinity` doesn't, and a
     # devcontainer spawns many short-lived processes (VS Code server, test
     # runs, agent CLIs).
@@ -22,6 +25,9 @@ services:
       - /workspace/.venv
       - /workspace/node_modules
     environment:
+      # No "${PYTHONPATH}:" prefix: an empty leading entry would put the
+      # current working directory on sys.path.
+      PYTHONPATH: /workspace/src
       # Don't write .pyc files (__pycache__ directories).
       PYTHONDONTWRITEBYTECODE: 1
       LOG_LEVEL: ${LOG_LEVEL:-INFO}

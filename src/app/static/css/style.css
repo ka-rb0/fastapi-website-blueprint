@@ -30,7 +30,7 @@ a {
 
 .theme-switch[hidden] {
   /* the display: flex below would otherwise beat the UA's [hidden] rule -
-     the switch must stay invisible until js/main.js has wired it */
+     the switch must stay invisible until js/theme-switch.js has wired it */
   display: none;
 }
 

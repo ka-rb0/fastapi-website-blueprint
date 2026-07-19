@@ -1,5 +1,14 @@
 # FastAPI Website Blueprint (with an Agent-Ready Development Environment)
 
+<!-- ?branch=main so the CI badge reports main's latest push run, not the
+     most recent PR run - the badge is the trust signal for the default
+     branch. The issues badge comes from shields.io (GitHub serves no native
+     badge for those); it reads the public GitHub API, so they update on
+     their own. -->
+
+[![CI](https://github.com/ka-rb0/fastapi-website-blueprint/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ka-rb0/fastapi-website-blueprint/actions/workflows/ci.yml?query=branch%3Amain)
+[![Open issues](https://img.shields.io/github/issues/ka-rb0/fastapi-website-blueprint)](https://github.com/ka-rb0/fastapi-website-blueprint/issues)
+
 ## Description
 
 A FastAPI-based blueprint for a modern, minimalist website with light and

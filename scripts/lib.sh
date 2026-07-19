@@ -16,6 +16,14 @@ cd "$(dirname -- "$0")/.." || exit 1
 # covers clones outside the devcontainer after `npm ci`.
 PATH="$PWD/node_modules/.bin:$PATH"
 
+# Every entry point runs uv, so checking at source time - unlike the
+# npm tools, which only lint and fix need.
+if ! command -v uv >/dev/null 2>&1; then
+  echo "$script_name: uv not on PATH - install it first" \
+    "(https://docs.astral.sh/uv/; the devcontainer bakes it in)." >&2
+  exit 1
+fi
+
 require_npm_tools() {
   missing=""
   for tool in prettier eslint markdownlint-cli2; do

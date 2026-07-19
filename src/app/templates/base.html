@@ -1,0 +1,64 @@
+{#- The shared page skeleton: every page extends this and fills the blocks.
+    Values that used to be hand-mirrored are injected instead: the theme-color
+    metas come from css/theme.css and max_shout_length from app.main (both
+    exposed as Jinja globals in src/app/main.py) - no more keeping copies in
+    sync by hand.
+
+    Absolute URLs throughout: the 404 page is served at any missing path
+    (e.g. /some/deep/url), where relative URLs would resolve against the
+    missing path's directory instead of the site root. -#}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    {% block meta %}{% endblock %}
+    <title>{% block title %}{% endblock %}</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    {#- Tints browser chrome to match --bg; media-scoped, so it follows the
+        OS scheme. An in-page theme override doesn't retint the chrome - a
+        deliberate simplicity tradeoff. #}
+    <meta
+      name="theme-color"
+      media="(prefers-color-scheme: light)"
+      content="{{ theme_color.light }}"
+    />
+    <meta
+      name="theme-color"
+      media="(prefers-color-scheme: dark)"
+      content="{{ theme_color.dark }}"
+    />
+    <link rel="stylesheet" href="/css/theme.css" />
+    <link rel="stylesheet" href="/css/style.css" />
+    {#- Deliberately blocking (no defer/module): re-applies a saved theme
+        before first paint so there is no flash. A file, not an inline
+        script, because the CSP (see src/app/main.py) bans inline scripts. #}
+    <script src="/js/theme-init.js"></script>
+  </head>
+  <body>
+    <header>
+      {#- Inside <header> so landmark navigation reaches it; position: fixed
+          keeps it out of the flow. aria-pressed is owned by
+          js/theme-switch.js: hardcoding it here would be wrong whenever a
+          saved choice exists. Auto = follow the OS scheme. Ships hidden -
+          without JS the buttons would be dead controls; js/theme-switch.js
+          reveals the group once wired. #}
+      <div class="theme-switch" role="group" aria-label="Color theme" hidden>
+        <button type="button" data-theme-choice="light">Light</button>
+        <button type="button" data-theme-choice="auto">Auto</button>
+        <button type="button" data-theme-choice="dark">Dark</button>
+      </div>
+      <h1>{% block heading %}{% endblock %}</h1>
+    </header>
+
+    <main>{% block main %}{% endblock %}</main>
+
+    {% block footer %}{% endblock %}
+
+    {#- One module per feature, each its own script tag: separate module
+        graphs, so a failure (or deletion) of one never takes down another.
+        Page-specific modules go in the scripts block, next to their markup. #}
+    <script type="module" src="/js/theme-switch.js"></script>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

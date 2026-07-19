@@ -109,13 +109,13 @@ def test_docs_csp_not_leaked_via_dot_segments(server: str) -> None:
 
     Browsers resolve dot segments before sending, but raw clients (urllib
     included) send them literally - and StaticFiles serves the *normalized*
-    path, so /docs/../index.html is the homepage. The middleware must match
-    the docs prefix against the normalized path too, or this response would
-    get the relaxed policy.
+    path, so /docs/../css/theme.css is a real stylesheet. The middleware must
+    match the docs prefix against the normalized path too, or this response
+    would get the relaxed policy.
     """
-    with urllib.request.urlopen(f"{server}/docs/../index.html", timeout=5) as resp:
+    with urllib.request.urlopen(f"{server}/docs/../css/theme.css", timeout=5) as resp:
         assert resp.status == 200
-        assert "<title>FastAPI Website Blueprint</title>" in resp.read().decode()
+        assert "light-dark" in resp.read().decode()
         csp = resp.headers["Content-Security-Policy"]
         assert csp == SECURITY_HEADERS["Content-Security-Policy"]
 

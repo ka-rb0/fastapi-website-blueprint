@@ -1,0 +1,40 @@
+{#- The homepage - rendered by the `/` route in src/app/main.py. #}
+{% extends "base.html" %}
+
+{% block meta %}
+    <meta
+      name="description"
+      content="A minimal, modern FastAPI website blueprint with light and dark themes."
+    />
+{% endblock %}
+
+{% block title %}FastAPI Website Blueprint{% endblock %}
+
+{% block heading %}FastAPI Website Blueprint{% endblock %}
+
+{% block main %}
+      <p class="tagline">A minimal starting point. Build from here.</p>
+
+      {#- Example API round trip: js/shout.js posts the text to /api/shout
+          (pydantic-validated) and renders the uppercased reply below.
+          maxlength is MAX_SHOUT_LENGTH from src/app/main.py, injected at
+          render time - the server still validates; this only gives instant
+          feedback in the browser. #}
+      <form class="shout" id="shout-form">
+        <input
+          id="shout-input"
+          name="text"
+          aria-label="Text to shout"
+          placeholder="Type something…"
+          autocomplete="off"
+          maxlength="{{ max_shout_length }}"
+          required
+        />
+        <button type="submit">Shout</button>
+        <output for="shout-input" id="shout-output"></output>
+      </form>
+{% endblock %}
+
+{% block scripts %}
+    <script type="module" src="/js/shout.js"></script>
+{% endblock %}

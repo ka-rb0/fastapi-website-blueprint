@@ -104,7 +104,7 @@ def test_docs_gets_relaxed_csp(server: str) -> None:
 
 
 def test_openapi_schema_served(server: str) -> None:
-    """The schema the docs page reads stays at the FastAPI default URL."""
+    """The schema the docs page reads is served while docs are enabled."""
     with urllib.request.urlopen(f"{server}/openapi.json", timeout=5) as resp:
         assert resp.status == 200
         schema = json.load(resp)

@@ -33,10 +33,11 @@
   <body>
     <header>
       <!-- Inside <header> so landmark navigation reaches it; position: fixed
-           keeps it out of the flow. aria-pressed is owned by js/main.js:
-           hardcoding it here would be wrong whenever a saved choice exists.
-           Auto = follow the OS scheme. Ships hidden - without JS the buttons
-           would be dead controls; js/main.js reveals the group once wired. -->
+           keeps it out of the flow. aria-pressed is owned by
+           js/theme-switch.js: hardcoding it here would be wrong whenever a
+           saved choice exists. Auto = follow the OS scheme. Ships hidden -
+           without JS the buttons would be dead controls; js/theme-switch.js
+           reveals the group once wired. -->
       <div class="theme-switch" role="group" aria-label="Color theme" hidden>
         <button type="button" data-theme-choice="light">Light</button>
         <button type="button" data-theme-choice="auto">Auto</button>
@@ -48,7 +49,7 @@
     <main>
       <p class="tagline">A minimal starting point. Build from here.</p>
 
-      <!-- Example API round trip: js/main.js posts the text to /api/shout
+      <!-- Example API round trip: js/shout.js posts the text to /api/shout
            (pydantic-validated) and renders the uppercased reply below.
            maxlength mirrors MAX_SHOUT_LENGTH in src/app/main.py by hand
            (tests/test_static_consistency.py enforces the match) - the server
@@ -68,6 +69,10 @@
       </form>
     </main>
 
-    <script type="module" src="js/main.js"></script>
+    <!-- One module per feature, each its own script tag: separate module
+         graphs, so a failure (or deletion) of one never takes down the
+         other. Delete a feature's markup and its tag together. -->
+    <script type="module" src="js/theme-switch.js"></script>
+    <script type="module" src="js/shout.js"></script>
   </body>
 </html>

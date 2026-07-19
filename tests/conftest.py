@@ -1,9 +1,10 @@
 """
-Shared fixtures: one uvicorn server for the whole test run.
+Shared fixtures: live uvicorn servers, started once per session.
 
-The server listens on $WEBSITE_TEST_PORT (falling back to 20177, e.g. in CI)
-so the dev server on $WEBSITE_INTERNAL_PORT can stay up. No httpx /
-TestClient dependency - API tests hit the live server with urllib.
+The servers listen on $WEBSITE_TEST_PORT and the next port up (falling back
+to 20177, e.g. in CI) so the dev server on $WEBSITE_INTERNAL_PORT can stay
+up. No httpx / TestClient dependency - API tests hit the live servers with
+urllib.
 """
 
 import os
@@ -14,18 +15,21 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
 SRC_DIR = Path(__file__).parent.parent / "src"
-PORT = int(os.environ.get("WEBSITE_TEST_PORT", "20177"))
-BASE_URL = f"http://127.0.0.1:{PORT}"
+# The first port of the range the fixtures below use ($WEBSITE_TEST_PORT
+# itself for `server`, +1 for `docs_disabled_server`).
+BASE_PORT = int(os.environ.get("WEBSITE_TEST_PORT", "20177"))
 
 
-@pytest.fixture(scope="session")
-def server() -> Iterator[str]:
-    """Start uvicorn once per session and yield its base URL."""
+@contextmanager
+def _run_server(port: int, env: dict[str, str]) -> Iterator[str]:
+    """Start uvicorn on `port` with exactly `env`, yield its base URL when healthy."""
+    base_url = f"http://127.0.0.1:{port}"
     proc = subprocess.Popen(
         [
             sys.executable,
@@ -35,18 +39,16 @@ def server() -> Iterator[str]:
             "--host",
             "127.0.0.1",
             "--port",
-            str(PORT),
+            str(port),
         ],
         cwd=SRC_DIR,
-        # Docs on, explicitly: the suite tests the /docs page and its CSP
-        # exception, so it must not depend on the shell's environment.
-        env={**os.environ, "WEBSITE_ENABLE_DOCS": "1"},
+        env=env,
     )
     try:
         deadline = time.monotonic() + 15
         while True:
             try:
-                with urllib.request.urlopen(f"{BASE_URL}/api/health", timeout=1):
+                with urllib.request.urlopen(f"{base_url}/api/health", timeout=1):
                     break
             except urllib.error.HTTPError as err:
                 # The server is up but health failed - fail fast with the real
@@ -59,7 +61,7 @@ def server() -> Iterator[str]:
                 if time.monotonic() > deadline:
                     raise RuntimeError("uvicorn did not become ready in 15s") from err
                 time.sleep(0.2)
-        yield BASE_URL
+        yield base_url
     finally:
         # SIGINT, not terminate(): uvicorn shuts down gracefully on both, but
         # after SIGTERM it re-raises the signal, killing the process without
@@ -72,3 +74,25 @@ def server() -> Iterator[str]:
             # uvicorn ignored the signal - don't let teardown hang the suite
             proc.kill()
             proc.wait()
+
+
+@pytest.fixture(scope="session")
+def server() -> Iterator[str]:
+    """Start the server most tests hit, once per session."""
+    # Docs on, explicitly: the suite tests the /docs page and its CSP
+    # exception, so it must not depend on the shell's environment.
+    with _run_server(BASE_PORT, {**os.environ, "WEBSITE_ENABLE_DOCS": "1"}) as base_url:
+        yield base_url
+
+
+@pytest.fixture(scope="session")
+def docs_disabled_server() -> Iterator[str]:
+    """
+    Start a second server with WEBSITE_ENABLE_DOCS unset, for testing the gating.
+
+    The flag is read at app import, so covering both sides takes two server
+    processes. One port up from `server` - the two run concurrently.
+    """
+    env = {k: v for k, v in os.environ.items() if k != "WEBSITE_ENABLE_DOCS"}
+    with _run_server(BASE_PORT + 1, env) as base_url:
+        yield base_url

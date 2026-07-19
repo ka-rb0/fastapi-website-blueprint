@@ -15,7 +15,8 @@ def _cdn_reachable() -> bool:
     try:
         with urllib.request.urlopen(CDN_URL, timeout=5):
             return True
-    except urllib.error.HTTPError:
+    except urllib.error.HTTPError as err:
+        err.close()
         return True
     except OSError:
         return False

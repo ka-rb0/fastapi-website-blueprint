@@ -38,6 +38,14 @@ def test_shout_rejects_bodies_without_text(server: str) -> None:
     assert excinfo.value.code == 422
 
 
+def test_shout_rejects_empty_text(server: str) -> None:
+    """`text` carries min_length - the server floor behind the input's `required`."""
+    req = _post_json_request(f"{server}/api/shout", b'{"text": ""}')
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        urllib.request.urlopen(req, timeout=5)
+    assert excinfo.value.code == 422
+
+
 def test_shout_rejects_oversized_text(server: str) -> None:
     """`text` carries an explicit max_length - oversized input is a 422, not a 500."""
     body = json.dumps({"text": "x" * (MAX_SHOUT_LENGTH + 1)}).encode()

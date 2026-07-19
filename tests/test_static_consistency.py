@@ -2,8 +2,8 @@
 Guards for the values the rendered pages derive from their sources of truth.
 
 The templates no longer mirror anything by hand: the <meta name="theme-color">
-tags get --bg from css/theme.css and the shout input's maxlength gets
-MAX_SHOUT_LENGTH from app.main, both injected as Jinja globals (see
+tags get --bg from css/theme.css and the shout input's minlength/maxlength get
+MIN/MAX_SHOUT_LENGTH from app.main, all injected as Jinja globals (see
 src/app/main.py). These tests render the templates and check the injected
 values against the sources, so a broken pipeline (dropped meta tag, hardcoded
 value, reworded CSS the parser misses) fails loudly. favicon.svg is the one
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from app.main import MAX_SHOUT_LENGTH, templates, theme_css_pair
+from app.main import MAX_SHOUT_LENGTH, MIN_SHOUT_LENGTH, templates, theme_css_pair
 
 STATIC_DIR = Path(__file__).parent.parent / "src" / "app" / "static"
 
@@ -63,14 +63,18 @@ def test_favicon_uses_light_accent() -> None:
     assert colors == {light_accent}
 
 
-def test_shout_input_maxlength_matches_api_limit() -> None:
-    """The rendered shout input carries MAX_SHOUT_LENGTH as its maxlength."""
+@pytest.mark.parametrize(
+    ("attribute", "limit"),
+    [("minlength", MIN_SHOUT_LENGTH), ("maxlength", MAX_SHOUT_LENGTH)],
+)
+def test_shout_input_length_limits_match_api(attribute: str, limit: int) -> None:
+    """The rendered shout input mirrors MIN/MAX_SHOUT_LENGTH as its length limits."""
     html = _render("index.html")
     match = re.search(r'<input\b[^>]*\bid="shout-input"[^>]*>', html, re.DOTALL)
     assert match, '<input id="shout-input" ...> not found in the rendered index.html'
-    maxlength = re.search(r'\bmaxlength="(\d+)"', match.group(0))
-    assert maxlength, "the shout input carries no maxlength attribute"
-    assert int(maxlength.group(1)) == MAX_SHOUT_LENGTH
+    value = re.search(rf'\b{attribute}="(\d+)"', match.group(0))
+    assert value, f"the shout input carries no {attribute} attribute"
+    assert int(value.group(1)) == limit
 
 
 def test_theme_css_pair_rejects_missing_token() -> None:

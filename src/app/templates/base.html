@@ -1,8 +1,8 @@
 {#- The shared page skeleton: every page extends this and fills the blocks.
     Values that used to be hand-mirrored are injected instead: the theme-color
-    metas come from css/theme.css and max_shout_length from app.main (both
-    exposed as Jinja globals in src/app/main.py) - no more keeping copies in
-    sync by hand.
+    metas come from css/theme.css and the shout length limits from app.main
+    (all exposed as Jinja globals in src/app/main.py) - no more keeping
+    copies in sync by hand.
 
     Absolute URLs throughout: the 404 page is served at any missing path
     (e.g. /some/deep/url), where relative URLs would resolve against the

@@ -170,6 +170,13 @@ class SecurityHeadersMiddleware:
         # *normalized* path - a raw /docs/../css/theme.css is a real asset,
         # which must not be stamped with the relaxed docs CSP.
         path = posixpath.normpath(scope["path"])
+        # A prefix match, not /docs exactly: FastAPI serves more than one page
+        # under it (/docs/oauth2-redirect boots with an inline script too).
+        # Deliberately broader than a route-by-route list - a 404 *under*
+        # /docs/... also carries the relaxed policy (harmless: the 404 page
+        # reflects nothing, and the docs only exist in development) - because
+        # a subtree match survives the framework adding docs routes, and it is
+        # the pattern to copy when a new section needs its own CSP.
         is_docs = DOCS_ENABLED and (path == "/docs" or path.startswith("/docs/"))
 
         async def send_with_headers(message: Message) -> None:
@@ -183,21 +190,23 @@ class SecurityHeadersMiddleware:
         await self.app(scope, receive, send_with_headers)
 
 
+MIN_SHOUT_LENGTH = 1
 MAX_SHOUT_LENGTH = 1000
 
 # The pages are server-rendered from these templates so shared values live in
 # exactly one place: the base template holds the header/footer skeleton, and
 # the globals below feed it what used to be hand-mirrored - design tokens from
-# css/theme.css and MAX_SHOUT_LENGTH for the shout input's maxlength.
+# css/theme.css and the shout limits for the input's minlength/maxlength.
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 templates.env.globals["theme_color"] = theme_css_pair("bg")
+templates.env.globals["min_shout_length"] = MIN_SHOUT_LENGTH
 templates.env.globals["max_shout_length"] = MAX_SHOUT_LENGTH
 
 
 class ShoutPayload(BaseModel):
-    """Body of POST /api/shout - pydantic rejects anything without a string `text`."""
+    """Body of POST /api/shout - pydantic rejects anything but a non-empty string `text`."""
 
-    text: str = Field(max_length=MAX_SHOUT_LENGTH)
+    text: str = Field(min_length=MIN_SHOUT_LENGTH, max_length=MAX_SHOUT_LENGTH)
 
 
 class ShoutReply(BaseModel):

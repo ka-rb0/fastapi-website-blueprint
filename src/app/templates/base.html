@@ -38,16 +38,30 @@
   <body>
     <header>
       {#- Inside <header> so landmark navigation reaches it; position: fixed
-          keeps it out of the flow. aria-pressed is owned by
-          js/theme-switch.js: hardcoding it here would be wrong whenever a
-          saved choice exists. Auto = follow the OS scheme. Ships hidden -
-          without JS the buttons would be dead controls; js/theme-switch.js
-          reveals the group once wired. #}
-      <div class="theme-switch" role="group" aria-label="Color theme" hidden>
-        <button type="button" data-theme-choice="light">Light</button>
-        <button type="button" data-theme-choice="auto">Auto</button>
-        <button type="button" data-theme-choice="dark">Dark</button>
-      </div>
+          keeps it out of the flow. Native radios in a fieldset, not
+          aria-pressed toggle buttons: exactly one of Light/Auto/Dark is ever
+          active, and a radio group is the semantics for an exclusive choice -
+          assistive tech announces it as one-of-three, the group is a single
+          Tab stop, and arrow keys move the selection, all without custom key
+          handling. `checked` is owned by js/theme-switch.js: hardcoding it
+          here would be wrong whenever a saved choice exists. Auto = follow
+          the OS scheme. Ships hidden - without JS the radios would be dead
+          controls; js/theme-switch.js reveals the group once wired. #}
+      <fieldset class="theme-switch" hidden>
+        <legend>Color theme</legend>
+        <label>
+          <input type="radio" name="theme-choice" value="light" />
+          Light
+        </label>
+        <label>
+          <input type="radio" name="theme-choice" value="auto" />
+          Auto
+        </label>
+        <label>
+          <input type="radio" name="theme-choice" value="dark" />
+          Dark
+        </label>
+      </fieldset>
       <h1>
         {% block heading %}
         {% endblock heading %}

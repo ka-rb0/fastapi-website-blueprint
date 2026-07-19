@@ -40,28 +40,59 @@ a {
   top: 1rem;
   right: 1rem;
   display: flex;
+  /* strip the fieldset UA defaults; the pill below is the whole design */
+  margin: 0;
+  padding: 0;
   border: 1px solid var(--border);
   border-radius: 999px;
   overflow: hidden;
   background: var(--surface);
 }
 
-.theme-switch button {
-  border: none;
-  background: transparent;
+.theme-switch legend {
+  /* visually hidden, not display: none - it must stay in the accessibility
+     tree as the group's name */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.theme-switch label {
+  /* the label is the visible segment; its radio stretches over it below */
+  position: relative;
   color: var(--muted);
-  font: inherit;
   font-size: 0.85rem;
   padding: 0.35rem 0.9rem;
   cursor: pointer;
 }
 
-.theme-switch button:focus-visible {
+.theme-switch input {
+  /* invisible but not display: none / visibility: hidden - the radio must
+     stay focusable; stretched over its label so the whole segment is the
+     hit target */
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.theme-switch label:has(input:focus-visible) {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
-.theme-switch button[aria-pressed="true"] {
+.theme-switch label:has(input:checked:focus-visible) {
+  /* Tab always enters the group at the *checked* radio, and that segment's
+     background is the accent - an accent ring would vanish into it, making
+     keyboard focus look like it skipped the group. Ring in the segment's
+     text color instead. */
+  outline-color: var(--fg);
+}
+
+.theme-switch label:has(input:checked) {
   background: var(--accent);
   color: var(--accent-fg);
 }

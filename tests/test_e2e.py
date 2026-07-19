@@ -132,16 +132,14 @@ def test_mobile_layout(browser: Browser, server: str) -> None:
 
 
 def test_follows_os_scheme_until_choice(browser: Browser, server: str) -> None:
-    """Without a saved choice, Auto is pressed and CSS follows the OS."""
+    """Without a saved choice, Auto is checked and CSS follows the OS."""
     backgrounds = {}
     for scheme in ("light", "dark"):
         page = browser.new_page(color_scheme=scheme)
         try:
             page.goto(server)
             assert page.locator("html").get_attribute("data-theme") is None
-            expect(page.get_by_role("button", name="Auto")).to_have_attribute(
-                "aria-pressed", "true"
-            )
+            expect(page.get_by_role("radio", name="Auto")).to_be_checked()
             backgrounds[scheme] = page.evaluate(
                 "getComputedStyle(document.body).backgroundColor"
             )
@@ -152,39 +150,74 @@ def test_follows_os_scheme_until_choice(browser: Browser, server: str) -> None:
 
 def test_theme_switch_toggles(page: Page) -> None:
     html = page.locator("html")
-    page.get_by_role("button", name="Dark").click()
+    page.get_by_role("radio", name="Dark").check()
     expect(html).to_have_attribute("data-theme", "dark")
-    expect(page.get_by_role("button", name="Dark")).to_have_attribute(
-        "aria-pressed", "true"
-    )
-    page.get_by_role("button", name="Light").click()
+    expect(page.get_by_role("radio", name="Dark")).to_be_checked()
+    page.get_by_role("radio", name="Light").check()
     expect(html).to_have_attribute("data-theme", "light")
-    expect(page.get_by_role("button", name="Light")).to_have_attribute(
-        "aria-pressed", "true"
+    expect(page.get_by_role("radio", name="Light")).to_be_checked()
+
+
+def test_keyboard_arrow_moves_selection(page: Page) -> None:
+    """
+    Arrow keys move the selection and apply the theme.
+
+    The native radio behavior the group relies on instead of custom key
+    handling (see base.html).
+    """
+    page.get_by_role("radio", name="Auto").focus()
+    page.keyboard.press("ArrowRight")
+    expect(page.get_by_role("radio", name="Dark")).to_be_checked()
+    expect(page.locator("html")).to_have_attribute("data-theme", "dark")
+
+
+def test_focus_ring_visible_on_checked_segment(page: Page) -> None:
+    """
+    Tabbing into the group must show a visible focus ring.
+
+    Tab always enters a radio group at its *checked* radio, and that segment's
+    background is the accent color - a ring in the accent color would vanish
+    into it, making keyboard focus look like it skipped the group entirely.
+    """
+    page.keyboard.press("Tab")
+    expect(page.get_by_role("radio", name="Auto")).to_be_focused()
+    style = page.evaluate(
+        "() => {"
+        "  const label = document.querySelector("
+        "    '.theme-switch label:has(input:checked)');"
+        "  const s = getComputedStyle(label);"
+        "  return {"
+        "    outlineStyle: s.outlineStyle,"
+        "    outlineColor: s.outlineColor,"
+        "    background: s.backgroundColor,"
+        "  };"
+        "}"
+    )
+    assert style["outlineStyle"] == "solid", "no focus outline on the checked segment"
+    assert style["outlineColor"] != style["background"], (
+        "focus ring blends into the checked segment's background"
     )
 
 
 def test_auto_restores_os_theme(page: Page) -> None:
     """Auto clears the saved choice and returns to following the OS."""
-    page.get_by_role("button", name="Dark").click()
-    page.get_by_role("button", name="Auto").click()
-    # the auto-waiting expect first: once Auto reads pressed, the same click
+    page.get_by_role("radio", name="Dark").check()
+    page.get_by_role("radio", name="Auto").check()
+    # the auto-waiting expect first: once Auto reads checked, the same change
     # handler has also removed data-theme and cleared localStorage
-    expect(page.get_by_role("button", name="Auto")).to_have_attribute(
-        "aria-pressed", "true"
-    )
+    expect(page.get_by_role("radio", name="Auto")).to_be_checked()
     assert page.locator("html").get_attribute("data-theme") is None
     assert page.evaluate("localStorage.getItem('theme')") is None
 
 
 def test_theme_persists_across_reload(page: Page) -> None:
-    page.get_by_role("button", name="Dark").click()
+    page.get_by_role("radio", name="Dark").check()
     page.reload()
     expect(page.locator("html")).to_have_attribute("data-theme", "dark")
 
 
 def test_os_preference_not_persisted(page: Page) -> None:
-    """Merely visiting must not write to localStorage - only clicking may."""
+    """Merely visiting must not write to localStorage - only choosing may."""
     assert page.evaluate("localStorage.getItem('theme')") is None
-    page.get_by_role("button", name="Dark").click()
+    page.get_by_role("radio", name="Dark").check()
     assert page.evaluate("localStorage.getItem('theme')") == "dark"

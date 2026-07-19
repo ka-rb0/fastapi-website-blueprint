@@ -8,6 +8,7 @@ Run with:  uvicorn app.main:app --host 0.0.0.0 --port $WEBSITE_INTERNAL_PORT --r
 
 import logging
 import os
+import posixpath
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -143,7 +144,11 @@ class SecurityHeadersMiddleware:
             await self.app(scope, receive, send)
             return
 
-        path = scope["path"]
+        # Normalized, not the raw path: browsers resolve dot segments before
+        # sending, but raw clients need not, and StaticFiles serves the
+        # *normalized* path - a raw /docs/../index.html is the homepage, which
+        # must not be stamped with the relaxed docs CSP.
+        path = posixpath.normpath(scope["path"])
         is_docs = DOCS_ENABLED and (path == "/docs" or path.startswith("/docs/"))
 
         async def send_with_headers(message: Message) -> None:

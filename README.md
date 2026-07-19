@@ -2,7 +2,7 @@
 
 <!-- ?branch=main so the CI badge reports main's latest push run, not the
      most recent PR run - the badge is the trust signal for the default
-     branch. The issues badge come from shields.io (GitHub serves no native
+     branch. The issues badge comes from shields.io (GitHub serves no native
      badge for those); it reads the public GitHub API, so they update on
      their own. -->
 

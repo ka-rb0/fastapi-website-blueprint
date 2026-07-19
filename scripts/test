@@ -3,8 +3,19 @@
 # additionally runs mypy there; scripts/lint covers that here): API tests +
 # Playwright E2E against a live uvicorn server, with coverage measured and
 # enforced ([tool.coverage.*] in pyproject.toml is the single source of truth).
+#
+# `scripts/test --offline` deselects the tests marked `online` (the ones that
+# need outbound internet, e.g. the Swagger UI CDN) so an offline run stays
+# green instead of skipping or timing out on the network.
 . "$(dirname -- "$0")/lib.sh"
 
-check uv run pytest --cov
+case "${1-}" in
+  --offline) check uv run pytest --cov -m "not online" ;;
+  "") check uv run pytest --cov ;;
+  *)
+    echo "usage: $script_name [--offline]" >&2
+    exit 2
+    ;;
+esac
 
 summary

@@ -109,6 +109,10 @@ disallow_untyped_calls = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]  # so tests can import `app.*` without PYTHONPATH (CI)
+markers = [
+  # deselect with `pytest -m 'not online'` (what `scripts/test --offline` runs)
+  "online: needs outbound internet access (e.g. the Swagger UI CDN)",
+]
 
 [tool.coverage.run]
 # The suite exercises the app in a uvicorn *subprocess* (tests/conftest.py),

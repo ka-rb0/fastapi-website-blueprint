@@ -10,6 +10,7 @@ import { createRequire } from "node:module";
 // the workspace's node_modules directory.
 const require = createRequire(import.meta.url);
 const js = require("@eslint/js");
+const globals = require("globals");
 const { defineConfig } = require("eslint/config");
 
 // One rule set for every block below, so frontend code and root scripts are
@@ -45,6 +46,7 @@ export default defineConfig([
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "module",
+      globals: globals.nodeBuiltin,
     },
     rules: { ...js.configs.recommended.rules, ...stricterRules },
   },
@@ -57,16 +59,7 @@ export default defineConfig([
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "commonjs",
-      // only what scripts plausibly use - extend as needed
-      globals: {
-        require: "readonly",
-        module: "writable",
-        exports: "writable",
-        process: "readonly",
-        console: "readonly",
-        __dirname: "readonly",
-        __filename: "readonly",
-      },
+      globals: globals.node,
     },
     rules: { ...js.configs.recommended.rules, ...stricterRules },
   },
@@ -75,15 +68,22 @@ export default defineConfig([
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "module",
-      // only what the code actually uses - extend as the frontend grows
-      globals: {
-        document: "readonly",
-        localStorage: "readonly",
-        fetch: "readonly",
-        console: "readonly",
-      },
+      globals: globals.browser,
     },
-    rules: { ...js.configs.recommended.rules, ...stricterRules },
+    rules: {
+      ...js.configs.recommended.rules,
+      ...stricterRules,
+      // window properties globals.browser declares that would otherwise
+      // absorb typos silently instead of failing no-undef
+      "no-restricted-globals": [
+        "error",
+        "event",
+        "name",
+        "status",
+        "length",
+        "top",
+      ],
+    },
   },
   {
     // theme-init.js is loaded as a classic blocking script, not a module

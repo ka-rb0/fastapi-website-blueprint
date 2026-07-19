@@ -6,8 +6,8 @@
     cy="16"
     r="12"
     fill="none"
-    stroke="#6366f1"
+    stroke="#595cdb"
     stroke-width="2.5"
   />
-  <path d="M16 4a12 12 0 0 1 0 24Z" fill="#6366f1" />
+  <path d="M16 4a12 12 0 0 1 0 24Z" fill="#595cdb" />
 </svg>

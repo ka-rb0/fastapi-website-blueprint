@@ -10,15 +10,18 @@
   <p class="tagline">A minimal starting point. Build from here.</p>
   {#- Example API round trip: js/shout.js posts the text to /api/shout
           (pydantic-validated) and renders the uppercased reply below.
-          maxlength is MAX_SHOUT_LENGTH from src/app/main.py, injected at
-          render time - the server still validates; this only gives instant
-          feedback in the browser. #}
+          minlength/maxlength are MIN/MAX_SHOUT_LENGTH from src/app/main.py,
+          injected at render time - the server still validates; these only
+          give instant feedback in the browser. `required` stays alongside
+          minlength: an empty value skips minlength validation entirely, so
+          required is what actually blocks an empty submit. #}
   <form class="shout" id="shout-form">
     <input id="shout-input"
            name="text"
            aria-label="Text to shout"
            placeholder="Type something…"
            autocomplete="off"
+           minlength="{{ min_shout_length }}"
            maxlength="{{ max_shout_length }}"
            required />
     <button type="submit">Shout</button>

@@ -9,7 +9,11 @@
 # green instead of skipping or timing out on the network.
 . "$(dirname -- "$0")/lib.sh"
 
-case "${1-}" in
+# Matching "$*" (the whole argument list), not "$1": extra arguments after
+# --offline hit the usage error instead of being silently dropped. Arguments
+# are deliberately not forwarded to pytest - a partial run (say -k) would
+# just trip the enforced coverage threshold; run pytest directly for that.
+case "$*" in
   --offline) check uv run pytest --cov -m "not online" ;;
   "") check uv run pytest --cov ;;
   *)

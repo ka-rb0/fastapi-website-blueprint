@@ -109,3 +109,20 @@ def test_openapi_schema_served(server: str) -> None:
         assert resp.status == 200
         schema = json.load(resp)
     assert "/api/shout" in schema["paths"]
+
+
+@pytest.mark.parametrize("path", ["/docs", "/openapi.json"])
+def test_docs_paths_not_served_when_disabled(
+    docs_disabled_server: str, path: str
+) -> None:
+    """
+    Without WEBSITE_ENABLE_DOCS, neither the docs UI nor its schema exists.
+
+    Both must gate on the flag together, and /docs must carry the strict CSP,
+    not DOCS_CSP - the relaxation is only ever paired with a live docs page.
+    """
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        urllib.request.urlopen(f"{docs_disabled_server}{path}", timeout=5)
+    assert excinfo.value.code == 404
+    csp = excinfo.value.headers["Content-Security-Policy"]
+    assert csp == SECURITY_HEADERS["Content-Security-Policy"]

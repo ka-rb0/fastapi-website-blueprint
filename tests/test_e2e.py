@@ -1,9 +1,25 @@
 """End-to-end tests in headless Chromium via Playwright."""
 
+import urllib.error
+import urllib.request
 from collections.abc import Iterator
 
 import pytest
 from playwright.sync_api import Browser, ConsoleMessage, Page, expect, sync_playwright
+
+CDN_URL = "https://cdn.jsdelivr.net"
+
+
+def _cdn_reachable() -> bool:
+    """Return True if the CDN answers at all - any HTTP status counts as reachable."""
+    try:
+        with urllib.request.urlopen(CDN_URL, timeout=5):
+            return True
+    except urllib.error.HTTPError as err:
+        err.close()
+        return True
+    except OSError:
+        return False
 
 
 @pytest.fixture(scope="module")
@@ -45,6 +61,7 @@ def test_shout_round_trip(page: Page) -> None:
     expect(page.get_by_role("status")).to_have_text("HELLO")
 
 
+@pytest.mark.online
 def test_docs_renders_swagger_ui(browser: Browser, server: str) -> None:
     """
     The /docs page renders under its relaxed CSP (DOCS_CSP in app.main).
@@ -53,8 +70,16 @@ def test_docs_renders_swagger_ui(browser: Browser, server: str) -> None:
     boot script are allowed through, and Swagger UI paints. CSP violations
     surface as console errors, so any that slip past the render checks are
     asserted away too. Needs cdn.jsdelivr.net reachable - just like the
-    /docs page itself.
+    /docs page itself - hence the `online` marker and the reachability
+    probe below.
     """
+    if not _cdn_reachable():
+        pytest.skip(
+            f"{CDN_URL} is unreachable - no internet connection? The /docs page "
+            "loads Swagger UI from that CDN, so this test cannot run offline. "
+            "Use `scripts/test --offline` (or `pytest -m 'not online'`) to "
+            "deselect internet-dependent tests explicitly."
+        )
     csp_errors: list[str] = []
 
     def on_console(msg: ConsoleMessage) -> None:

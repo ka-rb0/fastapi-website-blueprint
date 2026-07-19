@@ -47,8 +47,11 @@ fastapi_app = FastAPI(
     title="FastAPI Website Blueprint",
     lifespan=lifespan,
     docs_url="/docs" if DOCS_ENABLED else None,
+    # The machine-readable schema is a dev tool just like the docs UI that
+    # consumes it, so it gates on the same flag.
+    openapi_url="/openapi.json" if DOCS_ENABLED else None,
     # No ReDoc: one docs UI is enough, and each one is its own set of CSP
-    # exceptions. The schema itself stays at the default /openapi.json.
+    # exceptions.
     redoc_url=None,
 )
 

@@ -2,11 +2,13 @@
 
 ## Checks / One-shot wrappers
 
-- `scripts/lint` <- every check in one run; keeps going on failure and
-  summarizes at the end, so one run shows everything that is wrong
+- `scripts/lint` <- every check in one run; keeps going on failure and summarizes at
+  the end, so one run shows everything that is wrong
 - `scripts/fix` <- every auto-fixer in one run
-- `scripts/test` <- the full test suite with enforced coverage (the same
-  pytest invocation CI uses)
+- `scripts/test` <- the full test suite with enforced coverage (the same pytest
+  invocation CI uses). One test needs outbound internet (the Swagger UI CDN) and
+  skips with an explicit message when it is unreachable; `scripts/test --offline`
+  deselects such tests (marked `online`) up front
 - `scripts/audit` <- the security audits that need network access
   (pip-audit, npm audit, zizmor - the same ones CI runs)
 
@@ -34,3 +36,4 @@ want to run a single tool by itself.
 - `prettier --write .` <- auto-fix
 - `markdownlint-cli2` <- globs and rule tweaks come from .markdownlint-cli2.jsonc
 - `markdownlint-cli2 --fix` <- auto-fix
+- `pytest -m 'not online'` <- the same deselection for a bare pytest run

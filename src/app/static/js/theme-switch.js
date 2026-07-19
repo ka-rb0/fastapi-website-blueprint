@@ -1,4 +1,6 @@
-// Entry point: the light/auto/dark theme switch and the shout example.
+// The light/auto/dark theme switch. One feature per module: this file and
+// js/shout.js load as separate <script type="module"> tags in index.html, so
+// deleting one feature (markup and script tag) never breaks the other.
 //
 // CSS light-dark() does the actual theming (see css/theme.css): no data-theme
 // on <html> means "follow the OS" (the Auto choice), an explicit data-theme
@@ -48,38 +50,3 @@ syncButtons();
 // The switch ships hidden (see index.html) - without JS it would be dead
 // buttons. Reveal it only now that the handlers above are wired.
 themeSwitch.hidden = false;
-
-// --- shout example ---------------------------------------------------------
-//
-// The template's example API round trip: POST the typed text to /api/shout
-// and render the uppercased reply. Copy this shape for real endpoints.
-
-const shoutForm = document.querySelector("#shout-form");
-const shoutInput = document.querySelector("#shout-input");
-const shoutButton = shoutForm.querySelector("button[type=submit]");
-const shoutOutput = document.querySelector("#shout-output");
-
-shoutForm.addEventListener("submit", async (event) => {
-  event.preventDefault(); // stay on the page instead of a full-page GET submit
-  // One request at a time: overlapping submits could resolve out of order
-  // and leave a stale reply on screen.
-  shoutButton.disabled = true;
-  try {
-    const response = await fetch("/api/shout", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: shoutInput.value }),
-    });
-    if (!response.ok) {
-      throw new Error(`unexpected HTTP ${response.status}`);
-    }
-    shoutOutput.textContent = (await response.json()).text;
-  } catch (error) {
-    // Network failure or non-2xx - tell the user instead of failing silently,
-    // and keep the real cause in the console for whoever is debugging.
-    console.error("shout failed:", error);
-    shoutOutput.textContent = "Something went wrong - please try again.";
-  } finally {
-    shoutButton.disabled = false;
-  }
-});

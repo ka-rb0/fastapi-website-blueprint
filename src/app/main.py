@@ -194,14 +194,16 @@ async def shout(payload: ShoutPayload) -> ShoutReply:
     return ShoutReply(text=payload.text.upper())
 
 
-@fastapi_app.exception_handler(StarletteHTTPException)
+@fastapi_app.exception_handler(404)
 async def branded_404(request: Request, exc: StarletteHTTPException) -> Response:
     """
-    Serve the branded 404 page for any 404 outside /api; else unchanged.
+    Serve the branded 404 page for any 404 outside /api; /api stays JSON.
 
-    StaticFiles raises HTTPException(404) for unknown paths, so this catches
-    misses from the mount below as well as unmatched routes. /api keeps
-    FastAPI's default JSON errors - browsers get a page, API clients get JSON.
+    Registered on the status code rather than StarletteHTTPException, so
+    other HTTP errors (405, ...) never enter it. Status-code handlers still
+    catch raised HTTPExceptions, so this sees misses from the StaticFiles
+    mount below as well as unmatched routes. /api falls through to FastAPI's
+    default JSON errors - browsers get a page, API clients get JSON.
     The 404 status is preserved: a "soft 404" (page with a 200) would make
     broken links look healthy to crawlers and monitoring.
 
@@ -211,7 +213,7 @@ async def branded_404(request: Request, exc: StarletteHTTPException) -> Response
     handler's check.
     """
     path = request.url.path
-    if exc.status_code == 404 and path != "/api" and not path.startswith("/api/"):
+    if path != "/api" and not path.startswith("/api/"):
         return FileResponse(STATIC_DIR / "not-found.html", status_code=404)
     return await http_exception_handler(request, exc)
 

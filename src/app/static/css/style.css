@@ -89,7 +89,7 @@ a {
      background is the accent - an accent ring would vanish into it, making
      keyboard focus look like it skipped the group. Ring in the segment's
      text color instead. */
-  outline-color: var(--fg);
+  outline-color: var(--accent-fg);
 }
 
 .theme-switch label:has(input:checked) {

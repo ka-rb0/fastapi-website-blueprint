@@ -17,6 +17,12 @@ from pathlib import Path
 import pytest
 
 from app.main import MAX_SHOUT_LENGTH, MIN_SHOUT_LENGTH, templates, theme_css_pair
+from tests.accessibility import (
+    NON_TEXT_CONTRAST_MINIMUM,
+    TEXT_CONTRAST_MINIMUM,
+    contrast_ratio,
+    hex_to_rgb,
+)
 
 STATIC_DIR = Path(__file__).parent.parent / "src" / "app" / "static"
 
@@ -61,6 +67,62 @@ def test_favicon_uses_light_accent() -> None:
     svg = (STATIC_DIR / "favicon.svg").read_text()
     colors = set(re.findall(HEX, svg))
     assert colors == {light_accent}
+
+
+def test_contrast_calculation_matches_wcag_reference_values() -> None:
+    """Guard the calculator behind every contrast threshold assertion."""
+    assert contrast_ratio((0, 0, 0), (255, 255, 255)) == pytest.approx(21)
+    assert contrast_ratio((255, 255, 255), (255, 255, 255)) == pytest.approx(1)
+
+
+@pytest.mark.parametrize(
+    ("foreground", "background"),
+    [
+        ("fg", "bg"),
+        ("fg", "surface"),
+        ("muted", "bg"),
+        ("muted", "surface"),
+        ("accent", "bg"),
+        ("accent-fg", "accent"),
+    ],
+)
+def test_text_token_pairs_meet_wcag_aa(foreground: str, background: str) -> None:
+    """Every text/background pairing meets WCAG AA's 4.5:1 minimum."""
+    foreground_colors = _token(foreground)
+    background_colors = _token(background)
+    for scheme, foreground_color, background_color in zip(
+        ("light", "dark"), foreground_colors, background_colors, strict=True
+    ):
+        ratio = contrast_ratio(
+            hex_to_rgb(foreground_color), hex_to_rgb(background_color)
+        )
+        assert ratio >= TEXT_CONTRAST_MINIMUM, (
+            f"{scheme} {foreground} on {background} is {ratio:.3f}:1; "
+            f"expected at least {TEXT_CONTRAST_MINIMUM}:1"
+        )
+
+
+@pytest.mark.parametrize(
+    ("indicator", "adjacent"),
+    [
+        ("border", "bg"),
+        ("border", "surface"),
+        ("accent", "surface"),
+        ("accent-fg", "accent"),
+    ],
+)
+def test_ui_token_pairs_meet_wcag_aa(indicator: str, adjacent: str) -> None:
+    """Control boundaries, selection states and focus rings meet 3:1."""
+    indicator_colors = _token(indicator)
+    adjacent_colors = _token(adjacent)
+    for scheme, indicator_color, adjacent_color in zip(
+        ("light", "dark"), indicator_colors, adjacent_colors, strict=True
+    ):
+        ratio = contrast_ratio(hex_to_rgb(indicator_color), hex_to_rgb(adjacent_color))
+        assert ratio >= NON_TEXT_CONTRAST_MINIMUM, (
+            f"{scheme} {indicator} against {adjacent} is {ratio:.3f}:1; "
+            f"expected at least {NON_TEXT_CONTRAST_MINIMUM}:1"
+        )
 
 
 @pytest.mark.parametrize(

@@ -18,14 +18,15 @@
      templates get --bg injected for their <meta name="theme-color"> tags
      (theme_css_pair in src/app/main.py parses it from here). Only
      favicon.svg still mirrors a value by hand (--accent) - SVG isn't
-     templated. Re-theming? Update the favicon too -
-     tests/test_static_consistency.py fails until it matches. */
+     templated. Re-theming? Update the favicon too. The consistency tests
+     enforce matching accent color and WCAG AA contrast for every text and 
+     control pairing below. */
   /*                 light    dark  */
   --bg: light-dark(#f5f5fa, #15151d);
   --fg: light-dark(#1c1c28, #ececf4);
   --muted: light-dark(#6b6b7b, #9a9aac);
   --surface: light-dark(#ffffff, #1f1f2b);
-  --border: light-dark(#d9d9e3, #33334a);
-  --accent: light-dark(#6366f1, #818cf8);
+  --border: light-dark(#858598, #6f6f89);
+  --accent: light-dark(#595cdb, #818cf8);
   --accent-fg: light-dark(#ffffff, #15151d);
 }

@@ -7,6 +7,8 @@ from collections.abc import Iterator
 import pytest
 from playwright.sync_api import Browser, ConsoleMessage, Page, expect, sync_playwright
 
+from tests.accessibility import NON_TEXT_CONTRAST_MINIMUM, contrast_ratio
+
 CDN_URL = "https://cdn.jsdelivr.net"
 
 
@@ -171,7 +173,10 @@ def test_keyboard_arrow_moves_selection(page: Page) -> None:
     expect(page.locator("html")).to_have_attribute("data-theme", "dark")
 
 
-def test_focus_ring_visible_on_checked_segment(page: Page) -> None:
+@pytest.mark.parametrize("theme", ["Light", "Dark"])
+def test_focus_ring_has_sufficient_contrast_on_checked_segment(
+    page: Page, theme: str
+) -> None:
     """
     Tabbing into the group must show a visible focus ring.
 
@@ -179,8 +184,10 @@ def test_focus_ring_visible_on_checked_segment(page: Page) -> None:
     background is the accent color - a ring in the accent color would vanish
     into it, making keyboard focus look like it skipped the group entirely.
     """
+    radio = page.get_by_role("radio", name=theme)
     page.keyboard.press("Tab")
-    expect(page.get_by_role("radio", name="Auto")).to_be_focused()
+    page.keyboard.press("ArrowLeft" if theme == "Light" else "ArrowRight")
+    expect(radio).to_be_focused()
     style = page.evaluate(
         "() => {"
         "  const label = document.querySelector("
@@ -188,14 +195,16 @@ def test_focus_ring_visible_on_checked_segment(page: Page) -> None:
         "  const s = getComputedStyle(label);"
         "  return {"
         "    outlineStyle: s.outlineStyle,"
-        "    outlineColor: s.outlineColor,"
-        "    background: s.backgroundColor,"
+        "    outlineColor: [...s.outlineColor.matchAll(/\\d+/g)].map(Number),"
+        "    background: [...s.backgroundColor.matchAll(/\\d+/g)].map(Number),"
         "  };"
         "}"
     )
     assert style["outlineStyle"] == "solid", "no focus outline on the checked segment"
-    assert style["outlineColor"] != style["background"], (
-        "focus ring blends into the checked segment's background"
+    ratio = contrast_ratio(style["outlineColor"], style["background"])
+    assert ratio >= NON_TEXT_CONTRAST_MINIMUM, (
+        f"{theme.lower()} focus ring contrast is {ratio:.3f}:1; expected at least "
+        f"{NON_TEXT_CONTRAST_MINIMUM}:1"
     )
 
 

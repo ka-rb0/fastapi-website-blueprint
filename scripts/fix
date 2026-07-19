@@ -9,6 +9,7 @@ require_npm_tools
 check uv run ruff check --fix .
 check uv run ruff format .
 check prettier --write .
+check uv run djlint src/app/templates --reformat
 check eslint --fix .
 check markdownlint-cli2 --fix
 

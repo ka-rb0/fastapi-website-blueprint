@@ -34,6 +34,10 @@ want to run a single tool by itself.
   <- PyPA advisory database vs uv.lock
 - `prettier --check .` <- respects .gitignore
 - `prettier --write .` <- auto-fix
+- `djlint src/app/templates --lint` <- lint Jinja templates; configuration
+  comes from `[tool.djlint]` in pyproject.toml
+- `djlint src/app/templates --check` <- check Jinja template formatting
+- `djlint src/app/templates --reformat` <- auto-format Jinja templates
 - `markdownlint-cli2` <- globs and rule tweaks come from .markdownlint-cli2.jsonc
 - `markdownlint-cli2 --fix` <- auto-fix
 - `pytest -m 'not online'` <- the same deselection for a bare pytest run

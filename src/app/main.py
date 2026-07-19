@@ -213,6 +213,7 @@ class ShoutReply(BaseModel):
 
 
 # Not in the OpenAPI schema: /docs documents the JSON API, not the pages.
+@fastapi_app.head("/", include_in_schema=False)
 @fastapi_app.get("/", include_in_schema=False)
 async def index(request: Request) -> Response:
     """Render the homepage."""

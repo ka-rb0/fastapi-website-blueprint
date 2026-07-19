@@ -22,6 +22,7 @@ runtime = [
 ]
 lint = [
   "codespell>=2.4.2",
+  "djlint>=1.40.10",
   "ruff>=0.15.22",
   # pip-audit checks the locked python packages against known-CVE databases
   "pip-audit>=2.9.0",
@@ -107,6 +108,13 @@ module = "tests.*"
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 disallow_untyped_calls = false
+
+[tool.djlint]
+profile = "jinja"
+indent = 2
+max_line_length = 88
+# base.html deliberately delegates page-specific metadata to child templates.
+ignore = "H030,H031"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

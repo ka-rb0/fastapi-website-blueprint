@@ -1,7 +1,8 @@
 """
 FastAPI Website Blueprint server.
 
-Serves the static frontend from src/app/static and the /api endpoints.
+Serves the pages (Jinja2 templates from src/app/templates), the static
+assets (src/app/static) and the /api endpoints.
 
 Run with:  uvicorn app.main:app --host 0.0.0.0 --port $WEBSITE_INTERNAL_PORT --reload
 """
@@ -9,14 +10,15 @@ Run with:  uvicorn app.main:app --host 0.0.0.0 --port $WEBSITE_INTERNAL_PORT --r
 import logging
 import os
 import posixpath
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exception_handlers import http_exception_handler
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -26,6 +28,25 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
+TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+
+def theme_css_pair(token: str) -> dict[str, str]:
+    """
+    Read a design token's (light, dark) hex pair from css/theme.css.
+
+    The CSS file stays the single source of truth for the design tokens; the
+    templates get the values injected (see the Jinja globals below) instead
+    of mirroring them by hand.
+    """
+    css = (STATIC_DIR / "css" / "theme.css").read_text()
+    hex_color = r"#[0-9a-fA-F]{6}"
+    match = re.search(
+        rf"--{token}:\s*light-dark\(({hex_color}),\s*({hex_color})\)", css
+    )
+    if match is None:
+        raise RuntimeError(f"--{token}: light-dark(...) not found in css/theme.css")
+    return {"light": match.group(1), "dark": match.group(2)}
 
 
 @asynccontextmanager
@@ -146,8 +167,8 @@ class SecurityHeadersMiddleware:
 
         # Normalized, not the raw path: browsers resolve dot segments before
         # sending, but raw clients need not, and StaticFiles serves the
-        # *normalized* path - a raw /docs/../index.html is the homepage, which
-        # must not be stamped with the relaxed docs CSP.
+        # *normalized* path - a raw /docs/../css/theme.css is a real asset,
+        # which must not be stamped with the relaxed docs CSP.
         path = posixpath.normpath(scope["path"])
         is_docs = DOCS_ENABLED and (path == "/docs" or path.startswith("/docs/"))
 
@@ -163,6 +184,14 @@ class SecurityHeadersMiddleware:
 
 
 MAX_SHOUT_LENGTH = 1000
+
+# The pages are server-rendered from these templates so shared values live in
+# exactly one place: the base template holds the header/footer skeleton, and
+# the globals below feed it what used to be hand-mirrored - design tokens from
+# css/theme.css and MAX_SHOUT_LENGTH for the shout input's maxlength.
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
+templates.env.globals["theme_color"] = theme_css_pair("bg")
+templates.env.globals["max_shout_length"] = MAX_SHOUT_LENGTH
 
 
 class ShoutPayload(BaseModel):
@@ -183,6 +212,14 @@ class ShoutReply(BaseModel):
     text: str
 
 
+# Not in the OpenAPI schema: /docs documents the JSON API, not the pages.
+@fastapi_app.head("/", include_in_schema=False)
+@fastapi_app.get("/", include_in_schema=False)
+async def index(request: Request) -> Response:
+    """Render the homepage."""
+    return templates.TemplateResponse(request, "index.html")
+
+
 @fastapi_app.get("/api/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -197,7 +234,7 @@ async def shout(payload: ShoutPayload) -> ShoutReply:
 @fastapi_app.exception_handler(404)
 async def branded_404(request: Request, exc: StarletteHTTPException) -> Response:
     """
-    Serve the branded 404 page for any 404 outside /api; /api stays JSON.
+    Render the branded 404 page for any 404 outside /api; /api stays JSON.
 
     Registered on the status code rather than StarletteHTTPException, so
     other HTTP errors (405, ...) never enter it. Status-code handlers still
@@ -206,20 +243,18 @@ async def branded_404(request: Request, exc: StarletteHTTPException) -> Response
     default JSON errors - browsers get a page, API clients get JSON.
     The 404 status is preserved: a "soft 404" (page with a 200) would make
     broken links look healthy to crawlers and monitoring.
-
-    The page is deliberately NOT named 404.html: StaticFiles(html=True)
-    special-cases that filename and would serve it for every miss itself -
-    including /api/* misses, which must stay JSON and never reach this
-    handler's check.
     """
     path = request.url.path
     if path != "/api" and not path.startswith("/api/"):
-        return FileResponse(STATIC_DIR / "not-found.html", status_code=404)
+        return templates.TemplateResponse(request, "not-found.html", status_code=404)
     return await http_exception_handler(request, exc)
 
 
-# Mounted last so /api routes take precedence over static files.
-fastapi_app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+# Assets only (css/, js/, favicon.svg) - the pages are routes above. Mounted
+# last so real routes take precedence. No html=True: its index.html/404.html
+# special-casing belonged to the all-static frontend; misses now raise 404s
+# that the handler above turns into the branded page.
+fastapi_app.mount("/", StaticFiles(directory=STATIC_DIR), name="static")
 
 # The ASGI app uvicorn serves (`app.main:app`): the FastAPI stack wrapped so
 # security headers land on every response, framework-generated 500s included.

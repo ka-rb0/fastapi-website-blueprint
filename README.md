@@ -16,7 +16,10 @@ dark themes.
 
 ## Features
 
-- Static frontend (vanilla HTML/CSS/JS, no build step) served by FastAPI.
+- Server-rendered pages (Jinja2 templates sharing one base layout) plus
+  static assets (vanilla CSS/JS, no build step), all served by FastAPI.
+  Shared values - design tokens from the CSS, API limits from Python - are
+  injected at render time instead of hand-mirrored.
 - Light and dark themes: respects `prefers-color-scheme`, switchable in the
   UI (Light / Auto / Dark, where Auto follows the OS), persisted in
   `localStorage`, applied before first paint (no flash).

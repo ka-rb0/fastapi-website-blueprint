@@ -1,12 +1,14 @@
 """
-Guards for the hand-mirrored values in the static frontend.
+Guards for the values the rendered pages derive from their sources of truth.
 
-The static files can't read their sources of truth and mirror values by
-hand: the <meta name="theme-color"> tags in the HTML pages and favicon.svg
-mirror design tokens from css/theme.css (--bg and --accent), and the shout
-input's maxlength mirrors MAX_SHOUT_LENGTH from app.main. These tests turn
-those files' "keep in sync" comments into an enforced invariant. Pure file
-checks - no server needed.
+The templates no longer mirror anything by hand: the <meta name="theme-color">
+tags get --bg from css/theme.css and the shout input's maxlength gets
+MAX_SHOUT_LENGTH from app.main, both injected as Jinja globals (see
+src/app/main.py). These tests render the templates and check the injected
+values against the sources, so a broken pipeline (dropped meta tag, hardcoded
+value, reworded CSS the parser misses) fails loudly. favicon.svg is the one
+file that still mirrors a token by hand - SVG isn't templated. Pure
+file/render checks - no server needed.
 """
 
 import re
@@ -14,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from app.main import MAX_SHOUT_LENGTH
+from app.main import MAX_SHOUT_LENGTH, templates, theme_css_pair
 
 STATIC_DIR = Path(__file__).parent.parent / "src" / "app" / "static"
 
@@ -22,18 +24,28 @@ HEX = r"#[0-9a-fA-F]{6}"
 
 
 def _token(name: str) -> tuple[str, str]:
-    """Return the (light, dark) hex pair of a token in css/theme.css."""
+    """
+    Return the (light, dark) hex pair of a token in css/theme.css.
+
+    Deliberately its own parse rather than calling app.main's theme_css_pair:
+    comparing the app's values against the app's own parser would be circular.
+    """
     css = (STATIC_DIR / "css" / "theme.css").read_text()
     match = re.search(rf"--{name}:\s*light-dark\(({HEX}),\s*({HEX})\)", css)
     assert match, f"--{name}: light-dark(...) not found in theme.css"
     return match.group(1), match.group(2)
 
 
+def _render(template: str) -> str:
+    """Render a page template exactly as the routes do (same env, same globals)."""
+    return templates.env.get_template(template).render()
+
+
 @pytest.mark.parametrize("page", ["index.html", "not-found.html"])
 def test_theme_color_metas_match_bg(page: str) -> None:
-    """The <meta name="theme-color"> tags mirror --bg for each scheme."""
+    """The rendered <meta name="theme-color"> tags carry --bg for each scheme."""
     light, dark = _token("bg")
-    html = (STATIC_DIR / page).read_text()
+    html = _render(page)
     metas = dict(
         re.findall(
             rf'media="\(prefers-color-scheme: (light|dark)\)"\s+content="({HEX})"',
@@ -52,10 +64,16 @@ def test_favicon_uses_light_accent() -> None:
 
 
 def test_shout_input_maxlength_matches_api_limit() -> None:
-    """The shout input's maxlength mirrors MAX_SHOUT_LENGTH in app.main."""
-    html = (STATIC_DIR / "index.html").read_text()
+    """The rendered shout input carries MAX_SHOUT_LENGTH as its maxlength."""
+    html = _render("index.html")
     match = re.search(r'<input\b[^>]*\bid="shout-input"[^>]*>', html, re.DOTALL)
-    assert match, '<input id="shout-input" ...> not found in index.html'
+    assert match, '<input id="shout-input" ...> not found in the rendered index.html'
     maxlength = re.search(r'\bmaxlength="(\d+)"', match.group(0))
     assert maxlength, "the shout input carries no maxlength attribute"
     assert int(maxlength.group(1)) == MAX_SHOUT_LENGTH
+
+
+def test_theme_css_pair_rejects_missing_token() -> None:
+    """A token the parser can't find fails loudly instead of rendering blanks."""
+    with pytest.raises(RuntimeError, match="no-such-token"):
+        theme_css_pair("no-such-token")

@@ -1,6 +1,7 @@
 """API tests against the live uvicorn server (see conftest.py)."""
 
 import json
+import re
 import urllib.error
 import urllib.request
 
@@ -52,7 +53,8 @@ def test_unknown_path_serves_404_page(server: str) -> None:
         urllib.request.urlopen(f"{server}/no-such-page", timeout=5)
     assert excinfo.value.code == 404
     assert excinfo.value.headers["Content-Type"].startswith("text/html")
-    assert "<h1>Page not found</h1>" in excinfo.value.read().decode()
+    html = excinfo.value.read().decode()
+    assert re.search(r"<h1>\s*Page not found\s*</h1>", html)
 
 
 @pytest.mark.parametrize("path", ["/api", "/api/", "/api/no-such-endpoint"])
@@ -79,7 +81,17 @@ def test_security_headers(server: str, path: str) -> None:
 def test_index_served(server: str) -> None:
     with urllib.request.urlopen(server, timeout=5) as resp:
         assert resp.status == 200
-        assert "<title>FastAPI Website Blueprint</title>" in resp.read().decode()
+        html = resp.read().decode()
+        assert re.search(r"<title>\s*FastAPI Website Blueprint\s*</title>", html)
+
+
+def test_index_supports_head(server: str) -> None:
+    """HEAD has the homepage's status and headers without a response body."""
+    request = urllib.request.Request(server, method="HEAD")
+    with urllib.request.urlopen(request, timeout=5) as resp:
+        assert resp.status == 200
+        assert resp.headers["Content-Type"].startswith("text/html")
+        assert resp.read() == b""
 
 
 def test_docs_page_served(server: str) -> None:
@@ -109,13 +121,13 @@ def test_docs_csp_not_leaked_via_dot_segments(server: str) -> None:
 
     Browsers resolve dot segments before sending, but raw clients (urllib
     included) send them literally - and StaticFiles serves the *normalized*
-    path, so /docs/../index.html is the homepage. The middleware must match
-    the docs prefix against the normalized path too, or this response would
-    get the relaxed policy.
+    path, so /docs/../css/theme.css is a real stylesheet. The middleware must
+    match the docs prefix against the normalized path too, or this response
+    would get the relaxed policy.
     """
-    with urllib.request.urlopen(f"{server}/docs/../index.html", timeout=5) as resp:
+    with urllib.request.urlopen(f"{server}/docs/../css/theme.css", timeout=5) as resp:
         assert resp.status == 200
-        assert "<title>FastAPI Website Blueprint</title>" in resp.read().decode()
+        assert "light-dark" in resp.read().decode()
         csp = resp.headers["Content-Security-Policy"]
         assert csp == SECURITY_HEADERS["Content-Security-Policy"]
 

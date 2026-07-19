@@ -87,7 +87,8 @@ export default defineConfig([
   },
   {
     // theme-init.js is loaded as a classic blocking script, not a module
-    // (see the <script> tags in index.html) - lint it as one, so module-only
+    // (see the <script> tags in templates/base.html) - lint it as one, so
+    // module-only
     // syntax like `import` can't pass the linter and then throw in the
     // browser. Globals and rules still come from the block above; this only
     // overrides how the file is parsed.

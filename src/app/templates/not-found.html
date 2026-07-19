@@ -1,0 +1,9 @@
+{#- The branded 404 page - rendered (with a real 404 status) by the handler
+    in src/app/main.py for any missing non-API path. #}
+{% extends "base.html" %}
+{% block title %}Page not found · FastAPI Website Blueprint{% endblock title %}
+{% block heading %}Page not found{% endblock heading %}
+{% block main %}
+  <p class="tagline">There is nothing at this address.</p>
+  <p><a href="/">Back to the home page</a></p>
+{% endblock main %}

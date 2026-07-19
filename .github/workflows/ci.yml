@@ -1,4 +1,4 @@
-# Runs on every push: lint (ruff + codespell + prettier + eslint), security
+# Runs on every push: lint (ruff + codespell + prettier + djLint + eslint), security
 # audits (pip-audit + npm audit + zizmor, all free; PRs also get a dependency
 # review), and the pytest suite (API tests + Playwright E2E against a live
 # uvicorn server).
@@ -76,6 +76,10 @@ jobs:
       # prettier@3 respects .gitignore, so caches/node_modules are excluded
       - name: Prettier check
         run: npx prettier --check .
+      - name: djLint lint
+        run: uv run djlint src/app/templates --lint
+      - name: djLint format check
+        run: uv run djlint src/app/templates --check
       - name: ESLint
         run: npx eslint .
       # globs and rule tweaks live in .markdownlint-cli2.jsonc

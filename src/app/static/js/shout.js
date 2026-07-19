@@ -1,7 +1,8 @@
 // The template's example API round trip: POST the typed text to /api/shout
 // and render the uppercased reply. Copy this shape for real endpoints - one
 // feature per module, loaded by its own <script type="module"> tag in
-// index.html, so deleting it (markup and script tag) touches nothing else.
+// templates/index.html, so deleting it (markup and script tag) touches
+// nothing else.
 
 const shoutForm = document.querySelector("#shout-form");
 const shoutInput = document.querySelector("#shout-input");

@@ -1,0 +1,4 @@
+# Jinja2 templates: prettier's HTML parser does not understand {% ... %} /
+# {# ... #} syntax and would mangle it. (Additive to prettier's defaults -
+# node_modules and .gitignore entries stay ignored too.)
+src/app/templates/

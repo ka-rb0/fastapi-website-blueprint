@@ -1,5 +1,6 @@
-// The light/auto/dark theme switch. One feature per module: this file and
-// js/shout.js load as separate <script type="module"> tags in index.html, so
+// The light/auto/dark theme switch. One feature per module: this file (in
+// templates/base.html, so every page gets it) and js/shout.js (in
+// templates/index.html) load as separate <script type="module"> tags, so
 // deleting one feature (markup and script tag) never breaks the other.
 //
 // CSS light-dark() does the actual theming (see css/theme.css): no data-theme

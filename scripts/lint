@@ -17,6 +17,8 @@ check uv run ruff check .
 check uv run ruff format --check .
 check uv run codespell .
 check prettier --check .
+check uv run djlint src/app/templates --lint
+check uv run djlint src/app/templates --check
 check eslint .
 check markdownlint-cli2
 check uv run zizmor --offline .github/workflows/

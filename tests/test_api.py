@@ -103,6 +103,23 @@ def test_docs_gets_relaxed_csp(server: str) -> None:
                 assert resp.headers[name] == value
 
 
+def test_docs_csp_not_leaked_via_dot_segments(server: str) -> None:
+    """
+    A raw /docs/../ path must carry the strict CSP, not DOCS_CSP.
+
+    Browsers resolve dot segments before sending, but raw clients (urllib
+    included) send them literally - and StaticFiles serves the *normalized*
+    path, so /docs/../index.html is the homepage. The middleware must match
+    the docs prefix against the normalized path too, or this response would
+    get the relaxed policy.
+    """
+    with urllib.request.urlopen(f"{server}/docs/../index.html", timeout=5) as resp:
+        assert resp.status == 200
+        assert "<title>FastAPI Website Blueprint</title>" in resp.read().decode()
+        csp = resp.headers["Content-Security-Policy"]
+        assert csp == SECURITY_HEADERS["Content-Security-Policy"]
+
+
 def test_openapi_schema_served(server: str) -> None:
     """The schema the docs page reads is served while docs are enabled."""
     with urllib.request.urlopen(f"{server}/openapi.json", timeout=5) as resp:

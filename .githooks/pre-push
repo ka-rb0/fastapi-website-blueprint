@@ -10,6 +10,12 @@
 #   git config core.hooksPath .githooks
 #
 # Emergency bypass (use sparingly): git push --no-verify
+#
+# Known tradeoff: the checks run against the working tree, not the commits
+# being pushed, so uncommitted changes can mask a broken commit or block a
+# clean one. Deliberate: checking the real commits would mean stashing or a
+# temp worktree, and stash-and-restore hooks are fragile. CI verifies the
+# actual commits anyway - this is just a fast local backstop.
 
 zero_sha="0000000000000000000000000000000000000000"
 

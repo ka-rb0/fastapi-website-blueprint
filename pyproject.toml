@@ -39,7 +39,8 @@ dev = [
 [tool.codespell]
 # single source of truth for the skip list - run as plain `codespell .`
 # (lockfiles are machine-generated: hashes and package names trip the checker)
-skip = "./.git,./node_modules,./.venv,./.pytest_cache,./.ruff_cache,./.mypy_cache,./uv.lock,./package-lock.json"
+# (codespell does not read .gitignore, so it needs its own entries)
+skip = "./.git,./node_modules,./.venv,./.pytest_cache,./.ruff_cache,./.mypy_cache,./uv.lock,./package-lock.json,./shared_folder/data"
 
 [tool.ruff]
 exclude = [".claude/"]

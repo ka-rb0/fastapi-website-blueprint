@@ -29,7 +29,7 @@ uvicorn app.main:app \
 ```
 
 - Open an external desktop browser (in your host)
-  - Go to `http://localhost:$WEBSITE_EXTERNAL_PORT$WEBSITE_REVERSE_PROXY_ROOT_PATH`
+  - Go to `https://proxy.localhost:$WEBSITE_EXTERNAL_HTTPS_PORT_WITH_REVERSE_PROXY$WEBSITE_REVERSE_PROXY_ROOT_PATH/`
     - e.g. <https://proxy.localhost:11121/prefix/>
 
 ## Good to know

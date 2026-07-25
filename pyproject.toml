@@ -16,18 +16,18 @@ license-files = ["LICENSE"]
 # itself needs.
 runtime = [
   "pydantic>=2.13.4",
-  "fastapi>=0.139.2",
+  "fastapi>=0.140.0",
   "jinja2>=3.1.6",
   "uvicorn[standard]>=0.51.0",
 ]
 lint = [
   "codespell>=2.4.2",
-  "djlint>=1.40.10",
-  "ruff>=0.15.22",
+  "djlint>=1.42.3",
+  "ruff>=0.16.0",
   # pip-audit checks the locked python packages against known-CVE databases
   "pip-audit>=2.9.0",
   # zizmor lints the GitHub Actions workflows for security footguns
-  "zizmor>=1.16.3",
+  "zizmor>=1.28.0",
 ]
 dev = [
   { include-group = "runtime" },

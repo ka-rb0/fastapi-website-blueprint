@@ -1,3 +1,10 @@
+# Caddy's address on the reverse-proxy network, pinned (see the network's
+# ipam config below) so uvicorn can trust exactly that peer for X-Forwarded-*
+# instead of trusting the whole network with "*". One literal, referenced
+# from both the network's static assignment and master's trust config below,
+# so the two can't drift apart.
+x-caddy-ip: &caddy_ip 172.28.238.2
+
 services:
   master:
     build:
@@ -38,6 +45,11 @@ services:
       # root path and trusted proxy headers (see docs/QUICKSTART.md).
       WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY: ${WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY:?set it in .devcontainer/.env, see .env.example}
       WEBSITE_REVERSE_PROXY_ROOT_PATH: ${WEBSITE_REVERSE_PROXY_ROOT_PATH:?set it in .devcontainer/.env, see .env.example}
+      # The only peer trusted to set X-Forwarded-* on that second listener
+      # (see docs/QUICKSTART.md) - Caddy's pinned address below, not "*". A
+      # deployment that reuses this pattern behind a different reverse proxy
+      # must point this at that proxy's real address instead.
+      WEBSITE_REVERSE_PROXY_TRUSTED_IP: *caddy_ip
       WEBSITE_TEST_PORT: ${WEBSITE_TEST_PORT:-20177}
       # Interactive API docs (/docs) are a dev tool: on by default in this
       # dev container, off anywhere the variable isn't set (production).
@@ -82,11 +94,19 @@ services:
       - "127.0.0.1:${WEBSITE_EXTERNAL_HTTP_PORT_WITH_REVERSE_PROXY:?set it in .devcontainer/.env, see .env.example}:80"
       - "127.0.0.1:${WEBSITE_EXTERNAL_HTTPS_PORT_WITH_REVERSE_PROXY:?set it in .devcontainer/.env, see .env.example}:443"
     networks:
-      - fastapi-website-blueprint-network
+      fastapi-website-blueprint-network:
+        ipv4_address: *caddy_ip
 
 networks:
   fastapi-website-blueprint-network:
     driver: bridge
+    ipam:
+      config:
+        # Deliberately a small, unusual range so pinning it is unlikely to
+        # collide with another Compose project's network already running on
+        # your machine. If `docker compose up` ever fails on a subnet
+        # overlap, change this (and x-caddy-ip above) to a free range.
+        - subnet: 172.28.238.0/29
 
 volumes:
   caddy-data:

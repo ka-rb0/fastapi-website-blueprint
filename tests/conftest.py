@@ -1,10 +1,10 @@
 """
 Shared fixtures: live uvicorn servers, started once per session.
 
-The servers listen on $WEBSITE_TEST_PORT and the next port up (falling back
-to 20177, e.g. in CI) so the dev server on $WEBSITE_INTERNAL_PORT can stay
-up. No httpx / TestClient dependency - API tests hit the live servers with
-urllib.
+The servers listen on $WEBSITE_TEST_PORT and the next two ports up (falling
+back to 20177, e.g. in CI) so the dev server on $WEBSITE_INTERNAL_PORT can
+stay up. No httpx / TestClient dependency - API tests hit the live servers
+with urllib.
 """
 
 import os
@@ -22,12 +22,15 @@ import pytest
 
 SRC_DIR = Path(__file__).parent.parent / "src"
 # The first port of the range the fixtures below use ($WEBSITE_TEST_PORT
-# itself for `server`, +1 for `docs_disabled_server`).
+# itself for `server`, +1 for `docs_disabled_server`, +2 for
+# `prefixed_server`).
 BASE_PORT = int(os.environ.get("WEBSITE_TEST_PORT", "20177"))
 
 
 @contextmanager
-def _run_server(port: int, env: dict[str, str]) -> Iterator[str]:
+def _run_server(
+    port: int, env: dict[str, str], extra_args: tuple[str, ...] = ()
+) -> Iterator[str]:
     """Start uvicorn on `port` with exactly `env`, yield its base URL when healthy."""
     base_url = f"http://127.0.0.1:{port}"
     proc = subprocess.Popen(
@@ -40,6 +43,7 @@ def _run_server(port: int, env: dict[str, str]) -> Iterator[str]:
             "127.0.0.1",
             "--port",
             str(port),
+            *extra_args,
         ],
         cwd=SRC_DIR,
         env=env,
@@ -95,4 +99,20 @@ def docs_disabled_server() -> Iterator[str]:
     """
     env = {k: v for k, v in os.environ.items() if k != "WEBSITE_ENABLE_DOCS"}
     with _run_server(BASE_PORT + 1, env) as base_url:
+        yield base_url
+
+
+@pytest.fixture(scope="session")
+def prefixed_server() -> Iterator[str]:
+    """
+    Start a server deployed under the URL prefix /prefix, two ports up.
+
+    --root-path is uvicorn's stand-in for a reverse proxy that mounts the app
+    at /prefix and strips the prefix before forwarding: requests arrive at
+    unprefixed paths, but every URL the app generates must carry /prefix
+    (tests/test_url_prefix.py asserts exactly that).
+    """
+    with _run_server(
+        BASE_PORT + 2, dict(os.environ), ("--root-path", "/prefix")
+    ) as base_url:
         yield base_url

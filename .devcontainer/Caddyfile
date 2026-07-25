@@ -1,0 +1,33 @@
+{
+	# The API is unnecessary for a static development configuration, and
+	# disabling it removes an extra administrative listener.
+	admin off
+	# The host and container HTTPS ports intentionally differ, so Caddy's
+	# automatic redirect would point at the wrong public port. Define the
+	# redirect explicitly below instead.
+	auto_https disable_redirects
+}
+
+http://proxy.localhost {
+	redir https://proxy.localhost:{$WEBSITE_EXTERNAL_HTTPS_PORT_WITH_REVERSE_PROXY}{uri} 308
+}
+
+https://proxy.localhost {
+	# Local CA state persists in the caddy-data volume. The host must trust its
+	# root certificate once; see .devcontainer/README.md.
+	tls internal
+
+	# Keep the canonical public root path slash-terminated.
+	@root_path path {$WEBSITE_REVERSE_PROXY_ROOT_PATH}
+	redir @root_path {$WEBSITE_REVERSE_PROXY_ROOT_PATH}/ 308
+
+	# handle_path strips the public prefix before forwarding. The second
+	# Uvicorn process receives ordinary app paths while --root-path tells
+	# FastAPI to put the public prefix back into every generated URL.
+	handle_path {$WEBSITE_REVERSE_PROXY_ROOT_PATH}/* {
+		reverse_proxy master:{$WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY}
+	}
+
+	# This proxy exposes the application only below the configured root path.
+	respond "Not found" 404
+}

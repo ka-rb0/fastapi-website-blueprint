@@ -27,6 +27,9 @@ dark themes.
   (pydantic-validated) and renders the uppercased reply - copy this shape
   for real endpoints.
 - API tests plus Playwright E2E tests against a live uvicorn server.
+- A development-only Caddy sidecar for exercising local HTTPS, forwarded
+  headers, and a stripped URL prefix against a second reload-enabled Uvicorn
+  process while preserving direct HTTP access.
 - Strict linting and type checking wired into CI.
 - Security by default: same-origin CSP and hardening headers on every
   response, and security scanning in CI (pip-audit, npm audit, zizmor,

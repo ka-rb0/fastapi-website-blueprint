@@ -2,17 +2,41 @@
 
 ## Run the server
 
+### Direct
+
+- Open a terminal and run the following command
+
 ```sh
 uvicorn app.main:app --host 0.0.0.0 --port $WEBSITE_INTERNAL_PORT --reload
 ```
 
-## Open in an external desktop browser
+- Open an external desktop browser (in your host)
+  - Go to `http://localhost:$WEBSITE_EXTERNAL_PORT`
+    - e.g. <http://localhost:11110/>
 
-- Go to `http://localhost:$WEBSITE_EXTERNAL_PORT`
-  - e.g. <http://localhost:11110/>
-- Interactive API docs (Swagger UI): `http://localhost:$WEBSITE_EXTERNAL_PORT/docs`
-  - A dev tool: only served when `WEBSITE_ENABLE_DOCS=1`, which the dev
-    container sets by default - don't set it in production
+### Through Caddy (reverse proxy)
+
+- Open a terminal and run the following command
+
+```sh
+uvicorn app.main:app \
+  --host 0.0.0.0 \
+  --port "$WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY" \
+  --reload \
+  --root-path "$WEBSITE_REVERSE_PROXY_ROOT_PATH" \
+  --proxy-headers \
+  --forwarded-allow-ips="*"
+```
+
+- Open an external desktop browser (in your host)
+  - Go to `http://localhost:$WEBSITE_EXTERNAL_PORT$WEBSITE_REVERSE_PROXY_ROOT_PATH`
+    - e.g. <https://proxy.localhost:11121/prefix/>
+
+## Good to know
+
+- Interactive API docs (Swagger UI): `<url>/docs` is a dev tool and is only
+  served when `WEBSITE_ENABLE_DOCS=1`, which the dev container sets by default.
+  Therefore don't set it in production!
 - To preview different screen sizes, press `Ctrl+Shift+M` in the browser's
   developer tools
 

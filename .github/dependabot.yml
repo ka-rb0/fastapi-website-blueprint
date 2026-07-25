@@ -1,8 +1,9 @@
 # Keeps every pinned version from silently aging - one entry per lock point:
 # GitHub Actions (SHA-pinned in ci.yml), python packages (uv.lock), npm lint
 # tools (package-lock.json), and the Docker images pulled in the consolidated
-# .devcontainer/Dockerfile (python, uv, and node). The agent CLIs float by
-# design (installer scripts, no lockfile).
+# .devcontainer/Dockerfile (python, uv, and node) plus the pinned Caddy image
+# in .devcontainer/docker-compose.yml. The agent CLIs float by design
+# (installer scripts, no lockfile).
 #
 # `groups` batches each ecosystem's minor + patch bumps into one weekly PR;
 # major bumps stay individual PRs so breaking changes get reviewed alone.

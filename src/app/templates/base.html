@@ -4,9 +4,12 @@
     (all exposed as Jinja globals in src/app/main.py) - no more keeping
     copies in sync by hand.
 
-    Absolute URLs throughout: the 404 page is served at any missing path
-    (e.g. /some/deep/url), where relative URLs would resolve against the
-    missing path's directory instead of the site root. -#}
+    Every URL is generated with url_for, never written literally: the 404
+    page is served at any missing path (e.g. /some/deep/url), where relative
+    URLs would resolve against the missing path's directory instead of the
+    site root, and url_for also carries the app's root_path, so the links
+    keep working when the app is deployed under a URL prefix (guarded by
+    tests/test_url_prefix.py). -#}
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -18,7 +21,9 @@
       {% block title %}
       {% endblock title %}
     </title>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon"
+          type="image/svg+xml"
+          href="{{ url_for('static', path='favicon.svg') }}" />
     {#- Tints browser chrome to match --bg; media-scoped, so it follows the
         OS scheme. An in-page theme override doesn't retint the chrome - a
         deliberate simplicity tradeoff. #}
@@ -28,12 +33,12 @@
     <meta name="theme-color"
           media="(prefers-color-scheme: dark)"
           content="{{ theme_color.dark }}" />
-    <link rel="stylesheet" href="/css/theme.css" />
-    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="{{ url_for('static', path='css/theme.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}" />
     {#- Deliberately blocking (no defer/module): re-applies a saved theme
         before first paint so there is no flash. A file, not an inline
         script, because the CSP (see src/app/main.py) bans inline scripts. #}
-    <script src="/js/theme-init.js"></script>
+    <script src="{{ url_for('static', path='js/theme-init.js') }}"></script>
   </head>
   <body>
     <header>
@@ -76,7 +81,8 @@
     {#- One module per feature, each its own script tag: separate module
         graphs, so a failure (or deletion) of one never takes down another.
         Page-specific modules go in the scripts block, next to their markup. #}
-    <script type="module" src="/js/theme-switch.js"></script>
+    <script type="module"
+            src="{{ url_for('static', path='js/theme-switch.js') }}"></script>
     {% block scripts %}
     {% endblock scripts %}
   </body>

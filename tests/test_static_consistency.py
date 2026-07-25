@@ -15,8 +15,15 @@ import re
 from pathlib import Path
 
 import pytest
+from starlette.requests import Request
 
-from app.main import MAX_SHOUT_LENGTH, MIN_SHOUT_LENGTH, templates, theme_css_pair
+from app.main import (
+    MAX_SHOUT_LENGTH,
+    MIN_SHOUT_LENGTH,
+    fastapi_app,
+    templates,
+    theme_css_pair,
+)
 from tests.accessibility import (
     NON_TEXT_CONTRAST_MINIMUM,
     TEXT_CONTRAST_MINIMUM,
@@ -43,8 +50,26 @@ def _token(name: str) -> tuple[str, str]:
 
 
 def _render(template: str) -> str:
-    """Render a page template exactly as the routes do (same env, same globals)."""
-    return templates.env.get_template(template).render()
+    """
+    Render a page template exactly as the routes do (same env, same globals).
+
+    Through TemplateResponse with a synthetic Request, not env.render():
+    the templates generate every URL with url_for, which resolves against
+    the request's app and base URL.
+    """
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "root_path": "",
+        "scheme": "http",
+        "server": ("testserver", 80),
+        "headers": [],
+        "query_string": b"",
+        "app": fastapi_app,
+        "router": fastapi_app.router,
+    }
+    return bytes(templates.TemplateResponse(Request(scope), template).body).decode()
 
 
 @pytest.mark.parametrize("page", ["index.html", "not-found.html"])

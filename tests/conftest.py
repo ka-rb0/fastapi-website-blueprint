@@ -111,8 +111,16 @@ def prefixed_server() -> Iterator[str]:
     at /prefix and strips the prefix before forwarding: requests arrive at
     unprefixed paths, but every URL the app generates must carry /prefix
     (tests/test_url_prefix.py asserts exactly that).
+
+    Docs on, explicitly, same as `server`: --root-path is also what makes
+    uvicorn set scope["path"] to "/prefix" + the request path (see the ASGI
+    spec and uvicorn's full_path = root_path + path), so this is the fixture
+    that exercises the docs-under-a-prefix CSP check in
+    tests/test_url_prefix.py.
     """
     with _run_server(
-        BASE_PORT + 2, dict(os.environ), ("--root-path", "/prefix")
+        BASE_PORT + 2,
+        {**os.environ, "WEBSITE_ENABLE_DOCS": "1"},
+        ("--root-path", "/prefix"),
     ) as base_url:
         yield base_url

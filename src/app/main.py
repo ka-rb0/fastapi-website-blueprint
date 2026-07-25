@@ -20,6 +20,18 @@ from fastapi.exception_handlers import http_exception_handler
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
+
+# _utils is private (leading underscore, no compatibility promise) - but
+# get_route_path is the exact function FastAPI's own router and StaticFiles
+# use to strip root_path back off scope["path"] before matching a route.
+# Relying on it, rather than reimplementing it, guarantees every
+# root_path-aware check in this file always agrees with what the router
+# actually served, even if Starlette's root_path handling itself changes -
+# and if this import ever breaks, the app's own routing breaks on the same
+# upgrade, loudly, so the risk is self-announcing. (starlette.routing also
+# has this name in scope, but only via an implicit re-export with no __all__
+# guarding it - this repo's mypy strict setting rejects relying on that.)
+from starlette._utils import get_route_path
 from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
@@ -165,11 +177,21 @@ class SecurityHeadersMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # scope["path"] is root_path-relative, not app-relative: per the ASGI
+        # spec (and uvicorn's own full_path = root_path + path), a reverse
+        # proxy deployment with --root-path /prefix turns every request's
+        # path into "/prefix/docs", not "/docs". get_route_path() undoes
+        # exactly that - the same reversal FastAPI's own router applies
+        # before matching /docs, so this check stays in sync with what the
+        # router actually served. Without it, a proxied /docs request gets
+        # the strict CSP (script-src 'self' etc.), and Swagger UI's
+        # cdn.jsdelivr.net assets and inline bootstrap script get silently
+        # CSP-blocked - a blank page.
         # Normalized, not the raw path: browsers resolve dot segments before
         # sending, but raw clients need not, and StaticFiles serves the
         # *normalized* path - a raw /docs/../css/theme.css is a real asset,
         # which must not be stamped with the relaxed docs CSP.
-        path = posixpath.normpath(scope["path"])
+        path = posixpath.normpath(get_route_path(scope))
         # A prefix match, not /docs exactly: FastAPI serves more than one page
         # under it (/docs/oauth2-redirect boots with an inline script too).
         # Deliberately broader than a route-by-route list - a 404 *under*
@@ -252,8 +274,14 @@ async def branded_404(request: Request, exc: StarletteHTTPException) -> Response
     default JSON errors - browsers get a page, API clients get JSON.
     The 404 status is preserved: a "soft 404" (page with a 200) would make
     broken links look healthy to crawlers and monitoring.
+
+    get_route_path(request.scope), not request.url.path: URL.path is built
+    straight from scope["path"] with no root_path stripped off (see
+    starlette.datastructures.URL.__init__), so behind a reverse proxy's
+    --root-path it would be "/prefix/api/..." - failing this check and
+    handing API clients an HTML error body instead of JSON.
     """
-    path = request.url.path
+    path = get_route_path(request.scope)
     if path != "/api" and not path.startswith("/api/"):
         return templates.TemplateResponse(request, "not-found.html", status_code=404)
     return await http_exception_handler(request, exc)

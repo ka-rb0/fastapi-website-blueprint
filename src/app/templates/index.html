@@ -8,14 +8,21 @@
 {% block heading %}FastAPI Website Blueprint{% endblock heading %}
 {% block main %}
   <p class="tagline">A minimal starting point. Build from here.</p>
-  {#- Example API round trip: js/shout.js posts the text to /api/shout
-          (pydantic-validated) and renders the uppercased reply below.
-          minlength/maxlength are MIN/MAX_SHOUT_LENGTH from src/app/main.py,
-          injected at render time - the server still validates; these only
-          give instant feedback in the browser. `required` stays alongside
-          minlength: an empty value skips minlength validation entirely, so
-          required is what actually blocks an empty submit. #}
-  <form class="shout" id="shout-form">
+  {#- Example API round trip: js/shout.js posts the text to the shout
+          endpoint (pydantic-validated) and renders the uppercased reply
+          below. The endpoint travels as the form's action/method metadata -
+          the script reads them instead of hardcoding a URL, so the generated
+          action (url_for honors root_path) keeps the feature working under a
+          URL prefix. minlength/maxlength are MIN/MAX_SHOUT_LENGTH from
+          src/app/main.py, injected at render time - the server still
+          validates; these only give instant feedback in the browser.
+          `required` stays alongside minlength: an empty value skips
+          minlength validation entirely, so required is what actually blocks
+          an empty submit. #}
+  <form class="shout"
+        id="shout-form"
+        method="post"
+        action="{{ url_for('shout') }}">
     <input id="shout-input"
            name="text"
            aria-label="Text to shout"
@@ -29,5 +36,5 @@
   </form>
 {% endblock main %}
 {% block scripts %}
-  <script type="module" src="/js/shout.js"></script>
+  <script type="module" src="{{ url_for('static', path='js/shout.js') }}"></script>
 {% endblock scripts %}

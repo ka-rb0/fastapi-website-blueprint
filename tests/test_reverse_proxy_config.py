@@ -1,7 +1,11 @@
 """Guards for the optional development Caddy topology."""
 
+import ipaddress
 import re
 from pathlib import Path
+from typing import Any
+
+import yaml
 
 REPO_ROOT = Path(__file__).parent.parent
 DEVCONTAINER_DIR = REPO_ROOT / ".devcontainer"
@@ -48,27 +52,64 @@ def test_reverse_proxy_example_environment_is_complete() -> None:
     assert len(ports) == len(set(ports)), "example environment reuses a port"
 
 
+def _compose() -> dict[str, Any]:
+    """
+    Parse docker-compose.yml structurally.
+
+    PyYAML is a declared dependency (see pyproject.toml) specifically so this
+    file can assert on the parsed config - service names, keys, image
+    strings - instead of raw text, which stays correct across reordering or
+    reformatting that raw text wouldn't survive.
+    """
+    compose: dict[str, Any] = yaml.safe_load(
+        (DEVCONTAINER_DIR / "docker-compose.yml").read_text()
+    )
+    return compose
+
+
+def _compose_services() -> dict[str, Any]:
+    """Return docker-compose.yml's `services` mapping."""
+    services: dict[str, Any] = _compose()["services"]
+    return services
+
+
 def test_caddy_image_is_versioned_and_digest_pinned() -> None:
     """The added development dependency follows the repository's image policy."""
-    compose = (DEVCONTAINER_DIR / "docker-compose.yml").read_text()
-    assert re.search(
-        r"^\s*image: caddy:\d+\.\d+\.\d+-alpine@sha256:[0-9a-f]{64}$",
-        compose,
-        re.MULTILINE,
-    )
+    image = _compose_services()["caddy"]["image"]
+    assert re.fullmatch(r"caddy:\d+\.\d+\.\d+-alpine@sha256:[0-9a-f]{64}", image)
 
 
 def test_caddy_is_independent_and_proxy_backend_stays_private() -> None:
     """Removing Caddy cannot break master, and its Uvicorn port is not published."""
-    compose = (DEVCONTAINER_DIR / "docker-compose.yml").read_text()
-    master, remainder = compose.split("\n  caddy:\n", 1)
-    caddy, _ = remainder.split("\nnetworks:\n", 1)
+    services = _compose_services()
+    master = services["master"]
+    caddy = services["caddy"]
 
-    assert "depends_on:" not in master
-    assert "depends_on:" not in caddy
-    assert "WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY" in master
-    assert "WEBSITE_REVERSE_PROXY_ROOT_PATH" in master
-    assert ":${WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY}" not in compose
+    assert "depends_on" not in master
+    assert "depends_on" not in caddy
+    assert "WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY" in master["environment"]
+    assert "WEBSITE_REVERSE_PROXY_ROOT_PATH" in master["environment"]
+
+    published_ports = [
+        port for service in services.values() for port in service.get("ports", [])
+    ]
+    assert not any(
+        "WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY" in port for port in published_ports
+    )
+
+
+def test_reverse_proxy_trusted_ip_matches_caddys_pinned_address() -> None:
+    """Uvicorn trusts exactly Caddy's pinned Compose-network address, not "*"."""
+    compose = _compose()
+    services = compose["services"]
+    trusted_ip = services["master"]["environment"]["WEBSITE_REVERSE_PROXY_TRUSTED_IP"]
+    assert trusted_ip != "*"
+
+    ((network_name, caddy_network),) = services["caddy"]["networks"].items()
+    assert caddy_network["ipv4_address"] == trusted_ip
+
+    subnet = compose["networks"][network_name]["ipam"]["config"][0]["subnet"]
+    assert ipaddress.ip_address(trusted_ip) in ipaddress.ip_network(subnet)
 
 
 def test_caddy_strips_configured_prefix_to_second_uvicorn_listener() -> None:

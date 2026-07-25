@@ -47,7 +47,7 @@ jobs:
           persist-credentials: false
       # python-version-file: requires-python in pyproject.toml is the single
       # source of truth for the Python line
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version-file: pyproject.toml
       # enable-cache keys uv's cache on uv.lock
@@ -136,7 +136,7 @@ jobs:
         with:
           # don't leave the workflow token in .git/config for later steps
           persist-credentials: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version-file: pyproject.toml
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2

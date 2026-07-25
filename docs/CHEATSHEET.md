@@ -15,7 +15,12 @@
 
 ## Run the server
 
-- `uvicorn app.main:app --host 0.0.0.0 --port $WEBSITE_INTERNAL_PORT --reload`
+Run either command, or both in separate terminals.
+
+- Direct:
+  `uvicorn app.main:app --host 0.0.0.0 --port "$WEBSITE_INTERNAL_PORT" --reload`
+- Through Caddy (reverse proxy):
+  `uvicorn app.main:app --host 0.0.0.0 --port "$WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY" --reload --root-path "$WEBSITE_REVERSE_PROXY_ROOT_PATH" --proxy-headers --forwarded-allow-ips="*"`
 
 ## Tests
 

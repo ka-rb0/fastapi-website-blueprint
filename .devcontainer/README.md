@@ -54,6 +54,22 @@ unchanged BuildKit cache layers.
 The application source is bind-mounted at `/workspace`, and Compose sets
 `PYTHONPATH=/workspace/src`.
 
+## Development reverse proxy
+
+The Compose environment also starts a Caddy container. It is a
+development sidecar, not part of the image build graph or the distribution
+image:
+
+```text
+http://localhost:$WEBSITE_EXTERNAL_PORT
+  └──→ master:$WEBSITE_INTERNAL_PORT
+
+https://proxy.localhost:$WEBSITE_EXTERNAL_HTTPS_PORT_WITH_REVERSE_PROXY
+  └──→ Caddy
+       └── strips $WEBSITE_REVERSE_PROXY_ROOT_PATH
+           └──→ master:$WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY
+```
+
 ## Refresh the agent CLIs
 
 Docker does not check whether a remote script used by a cached `RUN`

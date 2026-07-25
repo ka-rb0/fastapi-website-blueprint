@@ -33,6 +33,11 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       DATA_PATH: ${DATA_PATH}
       WEBSITE_INTERNAL_PORT: ${WEBSITE_INTERNAL_PORT:?set it in .devcontainer/.env, see .env.example}
+      # A second, Compose-network-only Uvicorn listener used by Caddy. It is
+      # started manually just like the direct development server, but with a
+      # root path and trusted proxy headers (see docs/QUICKSTART.md).
+      WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY: ${WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY:?set it in .devcontainer/.env, see .env.example}
+      WEBSITE_REVERSE_PROXY_ROOT_PATH: ${WEBSITE_REVERSE_PROXY_ROOT_PATH:?set it in .devcontainer/.env, see .env.example}
       WEBSITE_TEST_PORT: ${WEBSITE_TEST_PORT:-20177}
       # Interactive API docs (/docs) are a dev tool: on by default in this
       # dev container, off anywhere the variable isn't set (production).
@@ -49,6 +54,40 @@ services:
       - fastapi-website-blueprint-network
     command: sleep infinity
 
+  caddy:
+    # Caddy is development infrastructure, not part of the distribution image.
+    # It starts with the Dev Container but remains independent: `master` does
+    # not depend on it, and removing this service leaves direct development
+    # unchanged. The tag and multi-platform digest are Dependabot-managed.
+    image: caddy:2.11.3-alpine@sha256:86deaf5e3d3408a6ccec08fbb79989783dd26e206ae10bcf78a801dc8c9ab794
+    init: true
+    environment:
+      WEBSITE_EXTERNAL_HTTPS_PORT_WITH_REVERSE_PROXY: ${WEBSITE_EXTERNAL_HTTPS_PORT_WITH_REVERSE_PROXY:?set it in .devcontainer/.env, see .env.example}
+      WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY: ${WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY:?set it in .devcontainer/.env, see .env.example}
+      WEBSITE_REVERSE_PROXY_ROOT_PATH: ${WEBSITE_REVERSE_PROXY_ROOT_PATH:?set it in .devcontainer/.env, see .env.example}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Persist Caddy's local development CA so its root certificate stays
+      # stable across container rebuilds and only needs to be trusted once.
+      - caddy-data:/data
+      - caddy-config:/config
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      # The official image listens on the standard HTTP/HTTPS ports.
+      - NET_BIND_SERVICE
+    ports:
+      - "127.0.0.1:${WEBSITE_EXTERNAL_HTTP_PORT_WITH_REVERSE_PROXY:?set it in .devcontainer/.env, see .env.example}:80"
+      - "127.0.0.1:${WEBSITE_EXTERNAL_HTTPS_PORT_WITH_REVERSE_PROXY:?set it in .devcontainer/.env, see .env.example}:443"
+    networks:
+      - fastapi-website-blueprint-network
+
 networks:
   fastapi-website-blueprint-network:
     driver: bridge
+
+volumes:
+  caddy-data:
+  caddy-config:

@@ -2,10 +2,11 @@
 
 ## Dependencies
 
-- `uv sync` <- everything in the dev group of pyproject.toml, at the exact
-  versions in uv.lock (in the devcontainer this targets the system
-  interpreter - no venv)
-- `uv sync --only-group runtime` <- just what the app needs
+- `uv sync` <- the runtime deps plus everything in the dev group of
+  pyproject.toml, at the exact versions in uv.lock (in the devcontainer this
+  targets the system interpreter - no venv)
+- `uv sync --no-default-groups` <- just what the app needs
+  (`[project.dependencies]`)
 - `uv lock --upgrade` <- refresh uv.lock to the latest versions by hand
   (Dependabot does this weekly)
 - `npm ci` <- prettier + eslint + markdownlint-cli2 at the exact versions in

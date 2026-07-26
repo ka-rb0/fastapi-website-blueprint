@@ -1,25 +1,33 @@
 [project]
-# Not a distributable package - this table just records project metadata
+# Not a distributable package - no [build-system], so uv installs only the
+# dependencies, never the project itself. The table records project metadata
 # (the Python version convention, machine-readable) for tools that read it.
 name = "fastapi-website-blueprint"
-version = "0.1.0"
+# The projects version is just a placeholder to prevent tools and linters from 
+# flagging it, the version of this project lives in GitHub
+version = "0.0.0"
 description = "A FastAPI-based blueprint for a modern, minimalist website with light and dark themes."
 requires-python = "==3.14.*"
 license = "MIT"  # PEP 639 license expression
 license-files = ["LICENSE"]
-
-[dependency-groups]
-# Single source of truth for dependencies (PEP 735). Exact versions are pinned
-# in uv.lock (kept current by Dependabot); these are floors. Install with
-# `uv sync` (all dev tools) or `uv sync --only-group <name>`. The devcontainer
-# base images already ship the dev tools; the runtime group is what the app
-# itself needs.
-runtime = [
+# What the app itself needs at run time. Standards-level metadata (PEP 621)
+# rather than a dependency group, so generic tooling - `pip install .`, SBOM
+# generators, dependency scanners - sees the runtime requirements too.
+# Exact versions are pinned in uv.lock (kept current by Dependabot); these
+# are floors. Install without the dev tooling: `uv sync --no-default-groups`.
+dependencies = [
   "pydantic>=2.13.4",
   "fastapi>=0.140.0",
   "jinja2>=3.1.6",
   "uvicorn[standard]>=0.51.0",
 ]
+
+[dependency-groups]
+# Development-only dependencies (PEP 735) - runtime requirements live in
+# [project.dependencies] above. Exact versions are pinned in uv.lock, same as
+# above. Install with `uv sync` (runtime + all dev tools) or
+# `uv sync --only-group <name>` (that group alone). The devcontainer base
+# images already ship the dev tools.
 lint = [
   "codespell>=2.4.2",
   "djlint>=1.42.3",
@@ -30,7 +38,6 @@ lint = [
   "zizmor>=1.28.0",
 ]
 dev = [
-  { include-group = "runtime" },
   { include-group = "lint" },
   "mypy>=2.2.0",
   "playwright>=1.61.0",

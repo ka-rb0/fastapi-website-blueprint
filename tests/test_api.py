@@ -126,7 +126,11 @@ def test_oversized_chunked_body_rejected(server: str, max_body_bytes: int) -> No
     Chunked requests carry no Content-Length (urllib switches to chunked
     transfer encoding for an iterable body), so the middleware can't reject
     up front - it must count the received bytes and stop at the first chunk
-    past the cap.
+    past the cap. The body must match the pre-routing 413's exactly: the two
+    rejection paths produce it by different mechanisms (hand-rolled
+    JSONResponse vs. HTTPException raised mid-stream - see "Request body cap"
+    in docs/ARCHITECTURE.md), and this pair of assertions is what keeps the
+    shapes from drifting apart.
     """
 
     def chunks() -> Iterator[bytes]:
@@ -145,6 +149,9 @@ def test_oversized_chunked_body_rejected(server: str, max_body_bytes: int) -> No
         urllib.request.urlopen(req, timeout=10)
     assert excinfo.value.code == 413
     assert excinfo.value.headers["Content-Type"] == "application/json"
+    assert json.load(excinfo.value) == {
+        "detail": f"Request body exceeds {max_body_bytes} bytes"
+    }
 
 
 def test_unknown_path_serves_404_page(server: str) -> None:

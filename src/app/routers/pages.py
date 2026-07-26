@@ -7,6 +7,7 @@ from starlette.responses import Response
 
 def create_pages_router(templates: Jinja2Templates) -> APIRouter:
     """Create page routes bound to one app's template environment."""
+    # Not in the OpenAPI schema: /docs documents the JSON API, not the pages.
     router = APIRouter(include_in_schema=False)
 
     @router.head("/")

@@ -8,6 +8,6 @@ from .factory import create_app
 # retains the conventional ready-to-serve application object.
 app = create_app(Settings.from_env())
 
-# Only the served application: import create_app from the package root
-# instead - importing this module constructs an env-configured app.
+# Only the served application: import create_app from the package root (or its
+# defining module) instead - importing this module constructs an env-configured app.
 __all__ = ["app"]

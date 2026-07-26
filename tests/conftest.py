@@ -26,6 +26,14 @@ SRC_DIR = Path(__file__).parent.parent / "src"
 # configuration variants need no server - and no port.
 PORT_MIN = int(os.environ.get("WEBSITE_TEST_PORT_MIN", "20177"))
 PORT_MAX = int(os.environ.get("WEBSITE_TEST_PORT_MAX", "20179"))
+if PORT_MIN > PORT_MAX:
+    # Caught here rather than in _test_port, where an inverted range would
+    # surface as the "widen the range" error below - misleading advice when
+    # the range is not too narrow but backwards.
+    raise RuntimeError(
+        "WEBSITE_TEST_PORT_MIN..WEBSITE_TEST_PORT_MAX is inverted"
+        f" ({PORT_MIN}..{PORT_MAX}) - MIN must not be greater than MAX"
+    )
 
 
 def _test_port(offset: int) -> int:

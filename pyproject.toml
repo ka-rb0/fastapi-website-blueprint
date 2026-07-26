@@ -3,16 +3,16 @@
 # dependencies, never the project itself. The table records project metadata
 # (the Python version convention, machine-readable) for tools that read it.
 name = "fastapi-website-blueprint"
-# The projects version is just a placeholder to prevent tools and linters from 
-# flagging it, the version of this project lives in GitHub
+# A placeholder, only here so tools and linters stop flagging the missing key.
+# The project's real version lives in GitHub.
 version = "0.0.0"
 description = "A FastAPI-based blueprint for a modern, minimalist website with light and dark themes."
 requires-python = "==3.14.*"
 license = "MIT"  # PEP 639 license expression
 license-files = ["LICENSE"]
 # What the app itself needs at run time. Standards-level metadata (PEP 621)
-# rather than a dependency group, so generic tooling - `pip install .`, SBOM
-# generators, dependency scanners - sees the runtime requirements too.
+# rather than a dependency group, so every tool that reads PEP 621 metadata -
+# SBOM generators, dependency scanners - sees the runtime requirements too.
 # Exact versions are pinned in uv.lock (kept current by Dependabot); these
 # are floors. Install without the dev tooling: `uv sync --no-default-groups`.
 dependencies = [

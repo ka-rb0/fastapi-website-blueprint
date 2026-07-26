@@ -32,8 +32,9 @@ dark themes.
   process while preserving direct HTTP access.
 - Strict linting and type checking wired into CI.
 - Security by default: same-origin CSP and hardening headers on every
-  response, and security scanning in CI (pip-audit, npm audit, zizmor,
-  CodeQL, dependency review).
+  response, a Host-header allowlist, a transport-level request-body cap,
+  and security scanning in CI (pip-audit, npm audit, zizmor, CodeQL,
+  dependency review).
 
 ## Overview
 

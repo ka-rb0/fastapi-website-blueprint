@@ -18,11 +18,16 @@
           validates; these only give instant feedback in the browser.
           `required` stays alongside minlength: an empty value skips
           minlength validation entirely, so required is what actually blocks
-          an empty submit. #}
+          an empty submit.
+          Ships hidden, like the theme switch in base.html: without JS a
+          native submit would send a form-encoded POST to the JSON-only
+          endpoint - a 422 error page. js/shout.js reveals the form once it
+          has taken over submission. #}
   <form class="shout"
         id="shout-form"
         method="post"
-        action="{{ url_for('shout') }}">
+        action="{{ url_for('shout') }}"
+        hidden>
     <input id="shout-input"
            name="text"
            aria-label="Text to shout"

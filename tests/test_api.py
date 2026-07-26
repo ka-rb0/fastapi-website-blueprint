@@ -4,10 +4,11 @@ import json
 import re
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
 
 import pytest
 
-from app.main import DOCS_CSP, MAX_SHOUT_LENGTH, SECURITY_HEADERS
+from app.main import DOCS_CSP, MAX_BODY_BYTES, MAX_SHOUT_LENGTH, SECURITY_HEADERS
 
 
 def _post_json_request(url: str, body: bytes) -> urllib.request.Request:
@@ -53,6 +54,52 @@ def test_shout_rejects_oversized_text(server: str) -> None:
     with pytest.raises(urllib.error.HTTPError) as excinfo:
         urllib.request.urlopen(req, timeout=5)
     assert excinfo.value.code == 422
+
+
+def test_oversized_body_rejected(server: str) -> None:
+    """
+    A body past MAX_BODY_BYTES is a 413 - the transport-level cap, as JSON.
+
+    Distinct from test_shout_rejects_oversized_text's 422: that field limit
+    only applies after the whole body has been received and JSON-decoded, so
+    BodySizeLimitMiddleware must refuse the bytes themselves first. The
+    declared Content-Length (urllib sets it for bytes) already exceeds the
+    cap, so rejection happens without the body being read.
+    """
+    body = b'{"text": "' + b"a" * MAX_BODY_BYTES + b'"}'
+    req = _post_json_request(f"{server}/api/shout", body)
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        urllib.request.urlopen(req, timeout=10)
+    assert excinfo.value.code == 413
+    assert excinfo.value.headers["Content-Type"] == "application/json"
+
+
+def test_oversized_chunked_body_rejected(server: str) -> None:
+    """
+    An oversized chunked upload is cut off with a 413 as it streams.
+
+    Chunked requests carry no Content-Length (urllib switches to chunked
+    transfer encoding for an iterable body), so the middleware can't reject
+    up front - it must count the received bytes and stop at the first chunk
+    past the cap.
+    """
+
+    def chunks() -> Iterator[bytes]:
+        yield b'{"text": "'
+        for _ in range(MAX_BODY_BYTES // 65536 + 1):
+            yield b"a" * 65536
+        yield b'"}'
+
+    req = urllib.request.Request(
+        f"{server}/api/shout",
+        data=chunks(),
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        urllib.request.urlopen(req, timeout=10)
+    assert excinfo.value.code == 413
+    assert excinfo.value.headers["Content-Type"] == "application/json"
 
 
 def test_unknown_path_serves_404_page(server: str) -> None:

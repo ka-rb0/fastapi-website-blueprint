@@ -56,8 +56,12 @@ exists - but they are only free on public repos:
 - 💰 [codeql.yml](../.github/workflows/codeql.yml) - CodeQL static analysis.
   On a private fork, delete the workflow or disable it in the Actions tab.
 - 💰 the `dependency-review` job in [ci.yml](../.github/workflows/ci.yml) -
-  blocks PRs that introduce vulnerable dependencies. On a private fork,
-  delete the job.
+  flags PRs that introduce vulnerable dependencies. Advisory by design: the
+  ruleset requires only `lint` and `test`, so a red run shows on the PR but
+  can still be merged - the required `lint` job's lockfile audits already
+  block vulnerable pinned dependencies, and staying non-required keeps an
+  escape hatch for merging past a known, accepted advisory. On a private
+  fork, delete the job.
 
 The other CI audits (`pip-audit`, `npm audit`, `zizmor`) query public
 advisory databases and are free everywhere - keep them.

@@ -50,6 +50,11 @@ services:
       # deployment that reuses this pattern behind a different reverse proxy
       # must point this at that proxy's real address instead.
       WEBSITE_REVERSE_PROXY_TRUSTED_IP: *caddy_ip
+      # Host-header allowlist (TRUSTED_HOSTS in src/app/main.py): the code's
+      # local default plus proxy.localhost, the public name whose requests
+      # Caddy forwards. Overridable from .env, e.g. to add a LAN IP when
+      # testing from a phone (see .env.example).
+      WEBSITE_TRUSTED_HOSTS: ${WEBSITE_TRUSTED_HOSTS:-localhost,127.0.0.1,proxy.localhost}
       WEBSITE_TEST_PORT: ${WEBSITE_TEST_PORT:-20177}
       # Interactive API docs (/docs) are a dev tool: on by default in this
       # dev container, off anywhere the variable isn't set (production).

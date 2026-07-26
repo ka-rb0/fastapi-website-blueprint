@@ -17,6 +17,7 @@ from starlette.types import Message, Receive, Scope, Send
 from app.main import (
     DOCS_CSP,
     SECURITY_HEADERS,
+    BodySizeLimitMiddleware,
     SecurityHeadersMiddleware,
     app,
     fastapi_app,
@@ -25,12 +26,14 @@ from app.main import (
 
 def test_app_is_wrapped_outside_the_framework() -> None:
     """
-    The served `app` must be the wrapper, outermost.
+    The served `app` must be the wrappers, header stamp outermost.
 
-    That ordering is what guarantees headers on ServerErrorMiddleware's 500s.
+    That ordering is what guarantees headers on ServerErrorMiddleware's 500s
+    - and on any response sent while the body-size guard is in the stack.
     """
     assert isinstance(app, SecurityHeadersMiddleware)
-    assert app.app is fastapi_app
+    assert isinstance(app.app, BodySizeLimitMiddleware)
+    assert app.app.app is fastapi_app
 
 
 def _directives(csp: str) -> dict[str, str]:

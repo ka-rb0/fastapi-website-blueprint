@@ -109,6 +109,10 @@ ENV PYTHONPATH=/src
 
 # Overridable at run time: docker run -e WEBSITE_INTERNAL_PORT=... -p ...
 ENV WEBSITE_INTERNAL_PORT=8000
+# Deployments must also set WEBSITE_TRUSTED_HOSTS to the site's public host
+# name(s): the code's default (see TRUSTED_HOSTS in src/app/main.py) trusts
+# only local names, so real traffic gets a 400 until it is set. Keep
+# 127.0.0.1 in the list - the HEALTHCHECK below probes it.
 # EXPOSE is build-time metadata only; a run-time WEBSITE_INTERNAL_PORT
 # override changes the bind port, not this line.
 EXPOSE ${WEBSITE_INTERNAL_PORT}

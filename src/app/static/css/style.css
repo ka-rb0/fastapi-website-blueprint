@@ -97,6 +97,20 @@ a {
   color: var(--accent-fg);
 }
 
+@media (forced-colors: active) {
+  /* Forced-colors mode (Windows High Contrast) overrides the authored
+     background/color pair that is the checked segment's only marker above,
+     which would leave the selection invisible. System colors are the one
+     palette the mode preserves, so restate the selection in the OS's own
+     highlight pair - plus an underline, a non-color indicator in case the
+     forced palette renders the pair close to the surrounding segments. */
+  .theme-switch label:has(input:checked) {
+    background: SelectedItem;
+    color: SelectedItemText;
+    text-decoration: underline;
+  }
+}
+
 /* --- layout ------------------------------------------------------------- */
 
 header {
@@ -125,6 +139,12 @@ main {
 }
 
 /* --- shout example ------------------------------------------------------- */
+
+.shout[hidden] {
+  /* the display: flex below would otherwise beat the UA's [hidden] rule -
+     the form must stay invisible until js/shout.js has taken over submission */
+  display: none;
+}
 
 .shout {
   display: flex;

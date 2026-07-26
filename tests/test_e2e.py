@@ -133,6 +133,67 @@ def test_mobile_layout(browser: Browser, server: str) -> None:
         page.close()
 
 
+def test_js_dependent_controls_hidden_without_javascript(
+    browser: Browser, server: str
+) -> None:
+    """
+    With JavaScript disabled, the page degrades to working static content.
+
+    Both interactive examples only function through their modules - the
+    theme radios have no effect without js/theme-switch.js, and a native
+    submit of the shout form would send a form-encoded POST to the
+    JSON-only endpoint, landing on a 422 error page. Each ships hidden and
+    is revealed by its script, so a no-JS visitor sees no dead controls.
+    """
+    page = browser.new_page(java_script_enabled=False)
+    try:
+        page.goto(server)
+        expect(
+            page.get_by_role("heading", name="FastAPI Website Blueprint")
+        ).to_be_visible()
+        expect(page.locator(".theme-switch")).to_be_hidden()
+        expect(page.locator("#shout-form")).to_be_hidden()
+    finally:
+        page.close()
+
+
+def test_forced_colors_keeps_selection_visible(browser: Browser, server: str) -> None:
+    """
+    In forced-colors mode the checked segment stays distinguishable.
+
+    The mode overrides the authored background/color pair that normally
+    marks the selection, so style.css restates it under @media
+    (forced-colors: active) with system colors - the one palette the mode
+    preserves - plus an underline as a non-color indicator.
+    """
+    page = browser.new_page(forced_colors="active")
+    try:
+        page.goto(server)
+        styles = page.evaluate(
+            "() => {"
+            "  const style = (selector) => {"
+            "    const s = getComputedStyle(document.querySelector(selector));"
+            "    return {"
+            "      background: s.backgroundColor,"
+            "      decoration: s.textDecorationLine,"
+            "    };"
+            "  };"
+            "  return {"
+            "    checked: style('.theme-switch label:has(input:checked)'),"
+            "    unchecked: style('.theme-switch label:has(input:not(:checked))'),"
+            "  };"
+            "}"
+        )
+        assert styles["checked"]["background"] != styles["unchecked"]["background"], (
+            "forced colors leave the checked segment's background "
+            "indistinguishable from its neighbors"
+        )
+        assert styles["checked"]["decoration"] == "underline"
+        assert styles["unchecked"]["decoration"] == "none"
+    finally:
+        page.close()
+
+
 def test_follows_os_scheme_until_choice(browser: Browser, server: str) -> None:
     """Without a saved choice, Auto is checked and CSS follows the OS."""
     backgrounds = {}

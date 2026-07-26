@@ -44,6 +44,16 @@ class Settings:
         and avoids mutating process-wide environment variables.
         """
         values = os.environ if environ is None else environ
+        raw_max_body_bytes = values.get(
+            "WEBSITE_MAX_BODY_BYTES", str(DEFAULT_MAX_BODY_BYTES)
+        )
+        try:
+            max_body_bytes = int(raw_max_body_bytes)
+        except ValueError:
+            raise ValueError(
+                f"WEBSITE_MAX_BODY_BYTES must be an integer byte count,"
+                f" got {raw_max_body_bytes!r}"
+            ) from None
         return cls(
             docs_enabled=values.get("WEBSITE_ENABLE_DOCS") == "1",
             trusted_hosts=tuple(
@@ -51,8 +61,6 @@ class Settings:
                     "WEBSITE_TRUSTED_HOSTS", ",".join(DEFAULT_TRUSTED_HOSTS)
                 ).split(",")
             ),
-            max_body_bytes=int(
-                values.get("WEBSITE_MAX_BODY_BYTES", str(DEFAULT_MAX_BODY_BYTES))
-            ),
+            max_body_bytes=max_body_bytes,
             log_level=values.get("LOG_LEVEL", "INFO"),
         )

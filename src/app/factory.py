@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.types import ASGIApp
 
 from .config import Settings
 from .exceptions import register_exception_handlers
@@ -14,7 +15,7 @@ from .templating import STATIC_DIR, create_templates
 APP_TITLE = "FastAPI Website Blueprint"
 
 
-def create_app(settings: Settings) -> SecurityHeadersMiddleware:
+def create_app(settings: Settings) -> ASGIApp:
     """Build a fully configured, independently testable ASGI application."""
     templates = create_templates()
     fastapi_app = FastAPI(
@@ -24,6 +25,8 @@ def create_app(settings: Settings) -> SecurityHeadersMiddleware:
         openapi_url="/openapi.json" if settings.docs_enabled else None,
         redoc_url=None,
     )
+    # Runtime code receives these through closures; state is the
+    # introspection point for tests and embedding code.
     fastapi_app.state.settings = settings
     fastapi_app.state.templates = templates
 
@@ -34,7 +37,10 @@ def create_app(settings: Settings) -> SecurityHeadersMiddleware:
     fastapi_app.include_router(api_router)
     register_exception_handlers(fastapi_app, templates)
 
-    # Mount assets last so application routes always take precedence.
+    # Mount assets last so application routes always take precedence. No
+    # html=True: its index.html/404.html special-casing belonged to an
+    # all-static frontend - misses must raise 404s that the branded handler
+    # (see app.exceptions) turns into the branded page.
     fastapi_app.mount("/", StaticFiles(directory=STATIC_DIR), name="static")
 
     body_limited_app = BodySizeLimitMiddleware(

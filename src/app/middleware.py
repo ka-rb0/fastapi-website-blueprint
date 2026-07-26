@@ -74,6 +74,9 @@ class SecurityHeadersMiddleware:
 
         # Normalize after removing root_path: StaticFiles serves the normalized
         # target, and FastAPI matches against the root-path-relative route.
+        # Raw clients need not resolve dot segments the way browsers do, so a
+        # raw /docs/../css/theme.css is a real asset that must keep the strict
+        # CSP, never the docs relaxation.
         path = posixpath.normpath(get_route_path(scope))
         is_docs = self.docs_enabled and (path == "/docs" or path.startswith("/docs/"))
 

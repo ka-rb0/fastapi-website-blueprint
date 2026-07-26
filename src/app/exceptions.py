@@ -13,6 +13,11 @@ from starlette.responses import Response
 def register_exception_handlers(app: FastAPI, templates: Jinja2Templates) -> None:
     """Register exception handlers that depend on app-owned resources."""
 
+    # Registered on the status code rather than StarletteHTTPException, so other
+    # HTTP errors (405, ...) never enter it. Status-code handlers still catch raised
+    # HTTPExceptions, so this sees misses from the StaticFiles mount as well as
+    # unmatched routes. The 404 status is preserved: a "soft 404" (page with a 200)
+    # would make broken links look healthy to crawlers and monitoring.
     @app.exception_handler(404)
     async def branded_404(request: Request, exc: StarletteHTTPException) -> Response:
         """

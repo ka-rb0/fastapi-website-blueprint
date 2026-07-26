@@ -12,6 +12,7 @@ file/render checks - no server needed.
 """
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,7 @@ from starlette.requests import Request
 
 from app.config import Settings
 from app.factory import create_app
-from app.middleware import BodySizeLimitMiddleware
+from app.middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from app.schemas import MAX_SHOUT_LENGTH, MIN_SHOUT_LENGTH
 from app.templating import theme_css_pair
 from tests.accessibility import (
@@ -34,11 +35,44 @@ STATIC_DIR = Path(__file__).parent.parent / "src" / "app" / "static"
 
 HEX = r"#[0-9a-fA-F]{6}"
 
-application = create_app(Settings())
-assert isinstance(application.app, BodySizeLimitMiddleware)
-assert isinstance(application.app.app, FastAPI)
-fastapi_app = application.app.app
-templates = fastapi_app.state.templates
+
+@pytest.fixture(scope="module")
+def fastapi_app() -> FastAPI:
+    """Return the framework app from a default factory build - no server needed."""
+    application = create_app(Settings())
+    assert isinstance(application, SecurityHeadersMiddleware)
+    assert isinstance(application.app, BodySizeLimitMiddleware)
+    assert isinstance(application.app.app, FastAPI)
+    return application.app.app
+
+
+@pytest.fixture(scope="module")
+def render(fastapi_app: FastAPI) -> Callable[[str], str]:
+    """
+    Render a page template exactly as the routes do (same env, same globals).
+
+    Through TemplateResponse with a synthetic Request, not env.render():
+    the templates generate every URL with url_for, which resolves against
+    the request's app and base URL.
+    """
+
+    def _render(template: str) -> str:
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "root_path": "",
+            "scheme": "http",
+            "server": ("testserver", 80),
+            "headers": [],
+            "query_string": b"",
+            "app": fastapi_app,
+            "router": fastapi_app.router,
+        }
+        templates = fastapi_app.state.templates
+        return bytes(templates.TemplateResponse(Request(scope), template).body).decode()
+
+    return _render
 
 
 def _token(name: str) -> tuple[str, str]:
@@ -54,34 +88,11 @@ def _token(name: str) -> tuple[str, str]:
     return match.group(1), match.group(2)
 
 
-def _render(template: str) -> str:
-    """
-    Render a page template exactly as the routes do (same env, same globals).
-
-    Through TemplateResponse with a synthetic Request, not env.render():
-    the templates generate every URL with url_for, which resolves against
-    the request's app and base URL.
-    """
-    scope = {
-        "type": "http",
-        "method": "GET",
-        "path": "/",
-        "root_path": "",
-        "scheme": "http",
-        "server": ("testserver", 80),
-        "headers": [],
-        "query_string": b"",
-        "app": fastapi_app,
-        "router": fastapi_app.router,
-    }
-    return bytes(templates.TemplateResponse(Request(scope), template).body).decode()
-
-
 @pytest.mark.parametrize("page", ["index.html", "not-found.html"])
-def test_theme_color_metas_match_bg(page: str) -> None:
+def test_theme_color_metas_match_bg(page: str, render: Callable[[str], str]) -> None:
     """The rendered <meta name="theme-color"> tags carry --bg for each scheme."""
     light, dark = _token("bg")
-    html = _render(page)
+    html = render(page)
     metas = dict(
         re.findall(
             rf'media="\(prefers-color-scheme: (light|dark)\)"\s+content="({HEX})"',
@@ -159,9 +170,11 @@ def test_ui_token_pairs_meet_wcag_aa(indicator: str, adjacent: str) -> None:
     ("attribute", "limit"),
     [("minlength", MIN_SHOUT_LENGTH), ("maxlength", MAX_SHOUT_LENGTH)],
 )
-def test_shout_input_length_limits_match_api(attribute: str, limit: int) -> None:
+def test_shout_input_length_limits_match_api(
+    attribute: str, limit: int, render: Callable[[str], str]
+) -> None:
     """The rendered shout input mirrors MIN/MAX_SHOUT_LENGTH as its length limits."""
-    html = _render("index.html")
+    html = render("index.html")
     match = re.search(r'<input\b[^>]*\bid="shout-input"[^>]*>', html, re.DOTALL)
     assert match, '<input id="shout-input" ...> not found in the rendered index.html'
     value = re.search(rf'\b{attribute}="(\d+)"', match.group(0))

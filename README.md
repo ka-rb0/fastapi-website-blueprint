@@ -49,7 +49,9 @@ The Python application uses an explicit composition root:
 `app.create_app(Settings(...))` creates an independent ASGI application,
 while `app.main:app` is the environment-configured Uvicorn entry point.
 Configuration, lifecycle, middleware, schemas, templates, exception handlers,
-and routers live in focused modules under `src/app`.
+and routers live in focused modules under `src/app`. The reasoning behind
+the non-obvious decisions (middleware ordering, CSP derivation, `root_path`
+handling, ...) is recorded in [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Commands
 

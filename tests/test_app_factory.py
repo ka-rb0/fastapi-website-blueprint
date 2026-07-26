@@ -17,8 +17,9 @@ from app.middleware import (
 )
 
 
-def _framework_app(application: SecurityHeadersMiddleware) -> FastAPI:
+def _framework_app(application: ASGIApp) -> FastAPI:
     """Return the FastAPI instance after asserting the production wrapper order."""
+    assert isinstance(application, SecurityHeadersMiddleware)
     assert isinstance(application.app, BodySizeLimitMiddleware)
     assert isinstance(application.app.app, FastAPI)
     return application.app.app
@@ -86,6 +87,8 @@ def test_factory_keeps_application_configurations_isolated() -> None:
 
     docs_app = create_app(docs_settings)
     production_app = create_app(production_settings)
+    assert isinstance(docs_app, SecurityHeadersMiddleware)
+    assert isinstance(production_app, SecurityHeadersMiddleware)
     docs_framework = _framework_app(docs_app)
     production_framework = _framework_app(production_app)
 
@@ -124,6 +127,19 @@ def test_factory_keeps_application_configurations_isolated() -> None:
         == SECURITY_HEADERS["Content-Security-Policy"]
     )
 
+    # The schema gates together with the docs UI, at the request level too -
+    # and its 404 carries the strict CSP, never the docs relaxation.
+    schema_status, _, _ = _get(docs_app, "/openapi.json", host="docs.example")
+    gated_status, gated_headers, _ = _get(
+        production_app, "/openapi.json", host="www.example"
+    )
+    assert schema_status == 200
+    assert gated_status == 404
+    assert (
+        gated_headers["content-security-policy"]
+        == SECURITY_HEADERS["Content-Security-Policy"]
+    )
+
 
 def test_settings_load_and_normalize_environment_values() -> None:
     settings = Settings.from_env(
@@ -148,6 +164,12 @@ def test_settings_defaults_are_production_safe() -> None:
         trusted_hosts=DEFAULT_TRUSTED_HOSTS,
         max_body_bytes=DEFAULT_MAX_BODY_BYTES,
     )
+
+
+def test_from_env_names_the_variable_for_a_non_integer_body_cap() -> None:
+    """The parse error names WEBSITE_MAX_BODY_BYTES, not just "invalid literal"."""
+    with pytest.raises(ValueError, match=r"WEBSITE_MAX_BODY_BYTES.*'1MB'"):
+        Settings.from_env({"WEBSITE_MAX_BODY_BYTES": "1MB"})
 
 
 @pytest.mark.parametrize(

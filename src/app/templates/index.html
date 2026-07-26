@@ -28,9 +28,9 @@
         method="post"
         action="{{ url_for('shout') }}"
         hidden>
+    <label for="shout-input">Text to shout</label>
     <input id="shout-input"
            name="text"
-           aria-label="Text to shout"
            placeholder="Type something…"
            autocomplete="off"
            minlength="{{ min_shout_length }}"

@@ -4,7 +4,7 @@
 // deleting one feature (markup and script tag) never breaks the other.
 //
 // CSS light-dark() does the actual theming (see css/theme.css): no data-theme
-// on <html> means "follow the OS" (the Auto choice), an explicit data-theme
+// on <html> means "follow the OS" (the System choice), an explicit data-theme
 // forces one scheme. The native radios (see base.html) own the exclusivity,
 // checked styling and keyboard behavior; this script only applies and
 // persists choices.
@@ -22,7 +22,7 @@ for (const radio of themeRadios) {
     } else {
       document.documentElement.dataset.theme = radio.value;
     }
-    // Persist only explicit choices - Auto clears the key, so the site goes
+    // Persist only explicit choices - System clears the key, so the site goes
     // back to following prefers-color-scheme, exactly like a first visit.
     try {
       if (radio.value === "auto") {

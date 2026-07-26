@@ -141,19 +141,26 @@ main {
 /* --- shout example ------------------------------------------------------- */
 
 .shout[hidden] {
-  /* the display: flex below would otherwise beat the UA's [hidden] rule -
+  /* the display: grid below would otherwise beat the UA's [hidden] rule -
      the form must stay invisible until js/shout.js has taken over submission */
   display: none;
 }
 
 .shout {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
   gap: 0.5rem;
 }
 
+.shout label {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
 .shout input {
+  min-width: 0;
   font: inherit;
   color: var(--fg);
   background: var(--surface);
@@ -175,7 +182,7 @@ main {
 .shout output {
   /* own full-width line under the controls; reserve the line so the first
      reply doesn't shift the layout */
-  flex-basis: 100%;
+  grid-column: 1 / -1;
   min-height: 1.5rem;
   text-align: center;
   font-weight: 600;

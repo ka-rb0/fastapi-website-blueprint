@@ -8,7 +8,9 @@ attacker-chosen Host would be reflected into every generated URL.
 """
 
 import urllib.error
+import urllib.parse
 import urllib.request
+from html.parser import HTMLParser
 
 import pytest
 
@@ -18,6 +20,46 @@ from app.main import SECURITY_HEADERS
 def _get_with_host(url: str, host: str) -> urllib.request.Request:
     """Build (not send) a GET whose Host header is `host`, not the URL's."""
     return urllib.request.Request(url, headers={"Host": host})
+
+
+class _UrlAttributeCollector(HTMLParser):
+    """Collect every URL-bearing attribute value (href/src/action) of a page."""
+
+    _URL_ATTRIBUTES = frozenset({"action", "href", "src"})
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.urls: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.urls += [
+            value
+            for name, value in attrs
+            if name in self._URL_ATTRIBUTES and value is not None
+        ]
+
+
+def _generated_origins(html: str) -> set[tuple[str, str]]:
+    """
+    Return the (scheme, host:port) origin of every absolute URL the page emits.
+
+    Parsed with urlsplit rather than matched as a substring of the page:
+    `"http://site.example/" in html` also passes on a URL that merely
+    *contains* the trusted host somewhere else in it - say
+    http://attacker.example/?next=http://site.example/ - so it would not
+    actually prove the pages were built for the trusted host. That is the
+    bypass CodeQL reports as py/incomplete-url-substring-sanitization ("the
+    string http://site.example/ may be at an arbitrary position in the
+    sanitized URL"); comparing parsed origins is the check it asks for.
+    """
+    collector = _UrlAttributeCollector()
+    collector.feed(html)
+    origins = set()
+    for url in collector.urls:
+        parts = urllib.parse.urlsplit(url)
+        if parts.scheme or parts.netloc:  # relative URLs carry no host to check
+            origins.add((parts.scheme, parts.netloc))
+    return origins
 
 
 @pytest.mark.parametrize("host", ["localhost", "127.0.0.1"])
@@ -58,13 +100,17 @@ def test_configured_public_host_accepted(trusted_hosts_server: str) -> None:
     """
     WEBSITE_TRUSTED_HOSTS admits the deployment's public host name.
 
-    site.example plays the Host a reverse proxy would forward; the URLs the
-    page generates carry it - reflection is fine once the host is trusted.
+    site.example plays the Host a reverse proxy would forward; every URL the
+    page generates carries it - reflection is fine once the host is trusted.
     """
     request = _get_with_host(trusted_hosts_server, "site.example")
     with urllib.request.urlopen(request, timeout=5) as resp:
         assert resp.status == 200
-        assert "http://site.example/" in resp.read().decode()
+        origins = _generated_origins(resp.read().decode())
+    assert origins == {("http", "site.example")}, (
+        f"the page's generated URLs point at {sorted(origins)}, "
+        "not only at the trusted host"
+    )
 
 
 def test_configured_allowlist_replaces_default(trusted_hosts_server: str) -> None:

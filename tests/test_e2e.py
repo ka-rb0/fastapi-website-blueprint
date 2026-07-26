@@ -55,6 +55,49 @@ def test_theme_switch_present(page: Page) -> None:
     expect(page.get_by_role("group", name="Color theme")).to_be_visible()
 
 
+def test_user_input_controls_meet_wcag_2_2_label_requirements(page: Page) -> None:
+    """
+    Every data-entry control has a visible native label.
+
+    WCAG 2.2 SC 3.3.2 (Labels or Instructions) requires labels or instructions
+    whenever content requires user input. Native label association also makes
+    each relationship programmatically determinable for SC 1.3.1.
+
+    This checks every current and future text field, radio, checkbox, select,
+    and textarea on the page. Hidden and button-like inputs do not accept data,
+    so SC 3.3.2 does not apply to them.
+    """
+    controls = page.locator(
+        "input:not([type=hidden]):not([type=button]):not([type=submit])"
+        ":not([type=reset]):not([type=image]), select, textarea"
+    )
+    unlabeled_controls = controls.evaluate_all(
+        """
+        controls => controls.flatMap(control => {
+          const visibleLabels = [...control.labels].filter(label => {
+            const style = getComputedStyle(label);
+            return label.textContent.trim()
+              && label.getClientRects().length
+              && style.visibility !== "hidden"
+              && style.opacity !== "0";
+          });
+          if (visibleLabels.length) {
+            return [];
+          }
+          const id = control.id ? `#${control.id}` : "";
+          const type = control instanceof HTMLInputElement
+            ? `[type=${control.type}]`
+            : "";
+          return [`${control.tagName.toLowerCase()}${id}${type}`];
+        })
+        """
+    )
+    assert not unlabeled_controls, (
+        "WCAG 2.2 SC 3.3.2 requires a visible label for every data-entry "
+        f"control; missing native labels: {', '.join(unlabeled_controls)}"
+    )
+
+
 def test_shout_round_trip(page: Page) -> None:
     """The example form posts the text to /api/shout and renders the reply."""
     page.get_by_label("Text to shout").fill("hello")
@@ -195,14 +238,14 @@ def test_forced_colors_keeps_selection_visible(browser: Browser, server: str) ->
 
 
 def test_follows_os_scheme_until_choice(browser: Browser, server: str) -> None:
-    """Without a saved choice, Auto is checked and CSS follows the OS."""
+    """Without a saved choice, System is checked and CSS follows the OS."""
     backgrounds = {}
     for scheme in ("light", "dark"):
         page = browser.new_page(color_scheme=scheme)
         try:
             page.goto(server)
             assert page.locator("html").get_attribute("data-theme") is None
-            expect(page.get_by_role("radio", name="Auto")).to_be_checked()
+            expect(page.get_by_role("radio", name="System")).to_be_checked()
             backgrounds[scheme] = page.evaluate(
                 "getComputedStyle(document.body).backgroundColor"
             )
@@ -228,7 +271,7 @@ def test_keyboard_arrow_moves_selection(page: Page) -> None:
     The native radio behavior the group relies on instead of custom key
     handling (see base.html).
     """
-    page.get_by_role("radio", name="Auto").focus()
+    page.get_by_role("radio", name="System").focus()
     page.keyboard.press("ArrowRight")
     expect(page.get_by_role("radio", name="Dark")).to_be_checked()
     expect(page.locator("html")).to_have_attribute("data-theme", "dark")
@@ -270,12 +313,12 @@ def test_focus_ring_has_sufficient_contrast_on_checked_segment(
 
 
 def test_auto_restores_os_theme(page: Page) -> None:
-    """Auto clears the saved choice and returns to following the OS."""
+    """System clears the saved choice and returns to following the OS."""
     page.get_by_role("radio", name="Dark").check()
-    page.get_by_role("radio", name="Auto").check()
-    # the auto-waiting expect first: once Auto reads checked, the same change
+    page.get_by_role("radio", name="System").check()
+    # the auto-waiting expect first: once System reads checked, the same change
     # handler has also removed data-theme and cleared localStorage
-    expect(page.get_by_role("radio", name="Auto")).to_be_checked()
+    expect(page.get_by_role("radio", name="System")).to_be_checked()
     assert page.locator("html").get_attribute("data-theme") is None
     assert page.evaluate("localStorage.getItem('theme')") is None
 

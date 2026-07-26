@@ -21,7 +21,7 @@ dark themes.
   Shared values - design tokens from the CSS, API limits from Python - are
   injected at render time instead of hand-mirrored.
 - Light and dark themes: respects `prefers-color-scheme`, switchable in the
-  UI (Light / Auto / Dark, where Auto follows the OS), persisted in
+  UI (Light / System / Dark, where System follows the OS), persisted in
   `localStorage`, applied before first paint (no flash).
 - Example API round trip: the "shout" form posts JSON to `/api/shout`
   (pydantic-validated) and renders the uppercased reply - copy this shape

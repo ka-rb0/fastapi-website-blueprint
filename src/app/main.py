@@ -35,7 +35,7 @@ from starlette._utils import get_route_path
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
@@ -253,14 +253,12 @@ class BodySizeLimitMiddleware:
     Caddyfile does), but this guard is what protects a directly exposed
     container - the distribution image runs uvicorn with no proxy of its own.
 
-    Wraps `receive`, not `send`: a body with an oversized declared
-    Content-Length fails on the app's first read without consuming a byte,
-    and chunked or lying uploads are counted as they stream and cut off at
-    the first byte past the limit. Raising HTTPException (rather than
-    sending a response here) hands the 413 to the framework's exception
-    handling, so API clients get the same JSON error shape as a 422. The
-    raise happens inside the app's own receive() call, which is what makes
-    that work even though this wrapper sits outside the framework stack.
+    An oversized declared Content-Length is rejected before routing, so the
+    cap also applies to endpoints and error paths that never read the body.
+    Chunked or lying uploads are counted as the downstream app reads them
+    and cut off at the first byte past the limit. A proxy-level cap is still
+    required to reject an oversized chunked body when the selected route
+    never consumes it.
     """
 
     def __init__(self, app: ASGIApp, max_body_bytes: int = MAX_BODY_BYTES) -> None:
@@ -276,17 +274,18 @@ class BodySizeLimitMiddleware:
         # int() without try/except: uvicorn's HTTP parser has already
         # rejected requests whose Content-Length is not a valid integer.
         declared = Headers(scope=scope).get("content-length")
-        too_large_by_declaration = (
-            declared is not None and int(declared) > self.max_body_bytes
-        )
+        if declared is not None and int(declared) > self.max_body_bytes:
+            response = JSONResponse(
+                {"detail": f"Request body exceeds {self.max_body_bytes} bytes"},
+                status_code=413,
+            )
+            await response(scope, receive, send)
+            return
+
         received = 0
 
         async def guarded_receive() -> Message:
             nonlocal received
-            if too_large_by_declaration:
-                raise StarletteHTTPException(
-                    413, detail=f"Request body exceeds {self.max_body_bytes} bytes"
-                )
             message = await receive()
             if message["type"] == "http.request":
                 received += len(message.get("body", b""))
@@ -382,7 +381,7 @@ fastapi_app.mount("/", StaticFiles(directory=STATIC_DIR), name="static")
 
 # The ASGI app uvicorn serves (`app.main:app`): the FastAPI stack wrapped so
 # security headers land on every response, framework-generated 500s included,
-# and no request can stream more than MAX_BODY_BYTES into memory. Headers
-# outermost: the body guard never sends a response itself, but keeping the
-# header stamp on the outside is what guarantees it covers everything.
+# oversized declared bodies are rejected before routing, and consumed streams
+# cannot exceed MAX_BODY_BYTES. Headers outermost so they also cover responses
+# sent directly by the body guard.
 app = SecurityHeadersMiddleware(BodySizeLimitMiddleware(fastapi_app))

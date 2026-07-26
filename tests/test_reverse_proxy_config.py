@@ -128,7 +128,7 @@ def test_caddy_caps_request_body_size() -> None:
     The dev proxy enforces the same transport-level body cap as the app.
 
     Caddy's "1MB" counts 10^6 bytes, matching MAX_BODY_BYTES' default in
-    src/app/main.py - the proxy refuses oversized uploads before uvicorn
+    src/app/config.py - the proxy refuses oversized uploads before uvicorn
     sees them, and the in-app guard covers directly exposed containers.
     """
     caddyfile = (DEVCONTAINER_DIR / "Caddyfile").read_text()

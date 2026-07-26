@@ -1,7 +1,7 @@
 """
 Shared fixtures: live uvicorn servers, started once per session.
 
-The servers listen on $WEBSITE_TEST_PORT and the next two ports up (falling
+The servers listen on $WEBSITE_TEST_PORT and selected ports above it (falling
 back to 20177, e.g. in CI) so the dev server on $WEBSITE_INTERNAL_PORT can
 stay up. No httpx / TestClient dependency - API tests hit the live servers
 with urllib.
@@ -22,8 +22,8 @@ import pytest
 
 SRC_DIR = Path(__file__).parent.parent / "src"
 # The first port of the range the fixtures below use ($WEBSITE_TEST_PORT
-# itself for `server`, +1 for `docs_disabled_server`, +2 for
-# `prefixed_server`, +3 for `trusted_hosts_server`).
+# itself for `server`, +2 for `prefixed_server`, +3 for
+# `trusted_hosts_server`). Factory-only configuration variants need no server.
 BASE_PORT = int(os.environ.get("WEBSITE_TEST_PORT", "20177"))
 
 
@@ -90,19 +90,6 @@ def server() -> Iterator[str]:
     # compose environment sets the variable).
     env = {k: v for k, v in os.environ.items() if k != "WEBSITE_TRUSTED_HOSTS"}
     with _run_server(BASE_PORT, {**env, "WEBSITE_ENABLE_DOCS": "1"}) as base_url:
-        yield base_url
-
-
-@pytest.fixture(scope="session")
-def docs_disabled_server() -> Iterator[str]:
-    """
-    Start a second server with WEBSITE_ENABLE_DOCS unset, for testing the gating.
-
-    The flag is read at app import, so covering both sides takes two server
-    processes. One port up from `server` - the two run concurrently.
-    """
-    env = {k: v for k, v in os.environ.items() if k != "WEBSITE_ENABLE_DOCS"}
-    with _run_server(BASE_PORT + 1, env) as base_url:
         yield base_url
 
 

@@ -79,7 +79,7 @@ def test_user_input_controls_meet_wcag_2_2_label_requirements(page: Page) -> Non
             return label.textContent.trim()
               && label.getClientRects().length
               && style.visibility !== "hidden"
-              && style.opacity !== "0";
+              && parseFloat(style.opacity) !== 0;
           });
           if (visibleLabels.length) {
             return [];
@@ -109,7 +109,7 @@ def test_shout_round_trip(page: Page) -> None:
 @pytest.mark.online
 def test_docs_renders_swagger_ui(browser: Browser, server: str) -> None:
     """
-    The /docs page renders under its relaxed CSP (DOCS_CSP in app.main).
+    The /docs page renders under its relaxed CSP (DOCS_CSP in app.middleware).
 
     Rendering the schema proves the whole chain: the CDN assets and inline
     boot script are allowed through, and Swagger UI paints. CSP violations

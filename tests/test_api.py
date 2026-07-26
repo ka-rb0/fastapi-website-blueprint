@@ -9,7 +9,22 @@ from collections.abc import Iterator
 
 import pytest
 
-from app.main import DOCS_CSP, MAX_BODY_BYTES, MAX_SHOUT_LENGTH, SECURITY_HEADERS
+from app.config import Settings
+from app.middleware import DOCS_CSP, SECURITY_HEADERS
+from app.schemas import MAX_SHOUT_LENGTH
+
+
+@pytest.fixture(scope="module")
+def max_body_bytes() -> int:
+    """
+    Return the live server's body cap (it inherits this shell env - conftest).
+
+    A fixture, not a module-level Settings.from_env(): parsing the shell env
+    at import time would kill collection of every test in this file when a
+    variable is malformed, instead of failing just the body-cap tests with a
+    clear error.
+    """
+    return Settings.from_env().max_body_bytes
 
 
 def _post_json_request(url: str, body: bytes) -> urllib.request.Request:
@@ -57,9 +72,9 @@ def test_shout_rejects_oversized_text(server: str) -> None:
     assert excinfo.value.code == 422
 
 
-def test_oversized_body_rejected(server: str) -> None:
+def test_oversized_body_rejected(server: str, max_body_bytes: int) -> None:
     """
-    A body past MAX_BODY_BYTES is a 413 - the transport-level cap, as JSON.
+    A body past the cap is a 413 - the transport-level limit, as JSON.
 
     Distinct from test_shout_rejects_oversized_text's 422: that field limit
     only applies after the whole body has been received and JSON-decoded, so
@@ -67,7 +82,7 @@ def test_oversized_body_rejected(server: str) -> None:
     declared Content-Length (urllib sets it for bytes) already exceeds the
     cap, so rejection happens without the body being read.
     """
-    body = b'{"text": "' + b"a" * MAX_BODY_BYTES + b'"}'
+    body = b'{"text": "' + b"a" * max_body_bytes + b'"}'
     req = _post_json_request(f"{server}/api/shout", body)
     with pytest.raises(urllib.error.HTTPError) as excinfo:
         urllib.request.urlopen(req, timeout=10)
@@ -80,7 +95,7 @@ def test_oversized_body_rejected(server: str) -> None:
     [("GET", "/api/health"), ("POST", "/no-such-route")],
 )
 def test_oversized_declared_body_rejected_before_routing(
-    server: str, method: str, path: str
+    server: str, method: str, path: str, max_body_bytes: int
 ) -> None:
     """
     An oversized Content-Length is a 413 even when the route won't read a body.
@@ -90,7 +105,7 @@ def test_oversized_declared_body_rejected_before_routing(
     """
     connection = http.client.HTTPConnection(server.removeprefix("http://"), timeout=5)
     connection.putrequest(method, path)
-    connection.putheader("Content-Length", str(MAX_BODY_BYTES + 1))
+    connection.putheader("Content-Length", str(max_body_bytes + 1))
     connection.endheaders()
 
     response = connection.getresponse()
@@ -98,25 +113,29 @@ def test_oversized_declared_body_rejected_before_routing(
         assert response.status == 413
         assert response.headers["Content-Type"] == "application/json"
         assert json.load(response) == {
-            "detail": f"Request body exceeds {MAX_BODY_BYTES} bytes"
+            "detail": f"Request body exceeds {max_body_bytes} bytes"
         }
     finally:
         connection.close()
 
 
-def test_oversized_chunked_body_rejected(server: str) -> None:
+def test_oversized_chunked_body_rejected(server: str, max_body_bytes: int) -> None:
     """
     An oversized chunked upload is cut off with a 413 as it streams.
 
     Chunked requests carry no Content-Length (urllib switches to chunked
     transfer encoding for an iterable body), so the middleware can't reject
     up front - it must count the received bytes and stop at the first chunk
-    past the cap.
+    past the cap. The body must match the pre-routing 413's exactly: the two
+    rejection paths produce it by different mechanisms (hand-rolled
+    JSONResponse vs. HTTPException raised mid-stream - see "Request body cap"
+    in docs/ARCHITECTURE.md), and this pair of assertions is what keeps the
+    shapes from drifting apart.
     """
 
     def chunks() -> Iterator[bytes]:
         yield b'{"text": "'
-        for _ in range(MAX_BODY_BYTES // 65536 + 1):
+        for _ in range(max_body_bytes // 65536 + 1):
             yield b"a" * 65536
         yield b'"}'
 
@@ -130,6 +149,9 @@ def test_oversized_chunked_body_rejected(server: str) -> None:
         urllib.request.urlopen(req, timeout=10)
     assert excinfo.value.code == 413
     assert excinfo.value.headers["Content-Type"] == "application/json"
+    assert json.load(excinfo.value) == {
+        "detail": f"Request body exceeds {max_body_bytes} bytes"
+    }
 
 
 def test_unknown_path_serves_404_page(server: str) -> None:
@@ -223,20 +245,3 @@ def test_openapi_schema_served(server: str) -> None:
         assert resp.status == 200
         schema = json.load(resp)
     assert "/api/shout" in schema["paths"]
-
-
-@pytest.mark.parametrize("path", ["/docs", "/openapi.json"])
-def test_docs_paths_not_served_when_disabled(
-    docs_disabled_server: str, path: str
-) -> None:
-    """
-    Without WEBSITE_ENABLE_DOCS, neither the docs UI nor its schema exists.
-
-    Both must gate on the flag together, and /docs must carry the strict CSP,
-    not DOCS_CSP - the relaxation is only ever paired with a live docs page.
-    """
-    with pytest.raises(urllib.error.HTTPError) as excinfo:
-        urllib.request.urlopen(f"{docs_disabled_server}{path}", timeout=5)
-    assert excinfo.value.code == 404
-    csp = excinfo.value.headers["Content-Security-Policy"]
-    assert csp == SECURITY_HEADERS["Content-Security-Policy"]

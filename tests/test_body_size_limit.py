@@ -11,7 +11,7 @@ from collections.abc import Iterator
 
 from starlette.types import Message, Receive, Scope, Send
 
-from app.main import BodySizeLimitMiddleware
+from app.middleware import BodySizeLimitMiddleware
 
 
 def test_non_body_messages_pass_through_uncounted() -> None:

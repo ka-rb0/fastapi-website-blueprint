@@ -38,19 +38,19 @@ uvicorn app.main:app \
   served when `WEBSITE_ENABLE_DOCS=1`, which the dev container sets by default.
   Therefore don't set it in production!
 - The app answers only requests whose `Host` header it trusts and rejects
-  the rest with a 400 (`TRUSTED_HOSTS` in `src/app/main.py`). The allowlist
-  matches _site names_ - what stands in the visitor's URL bar - never
-  clients: any device may connect, and in production, listing your domain
-  serves every visitor, exactly like nginx's `server_name`. The default
-  covers local development, and the dev container adds `proxy.localhost`
-  for the Caddy topology; a production deployment must set
+  the rest with a 400 (`Settings.trusted_hosts` in `src/app/config.py`).
+  The allowlist matches _site names_ - what stands in the visitor's URL bar -
+  never clients: any device may connect, and in production, listing your
+  domain serves every visitor, exactly like nginx's `server_name`. The
+  default covers local development, and the dev container adds
+  `proxy.localhost` for the Caddy topology; a production deployment must set
   `WEBSITE_TRUSTED_HOSTS` to its public host name(s) and keep `127.0.0.1`
   in the list for the container healthcheck. Testing from a phone on your
   LAN? The phone addresses the site by this machine's LAN IP, so add that
   IP - not the phone's - or use `"*"` while developing (see
   `.devcontainer/.env.example`).
-- Request bodies are capped at 1 MB with a 413 (`MAX_BODY_BYTES` in
-  `src/app/main.py`, overridable via `WEBSITE_MAX_BODY_BYTES`). The app
+- Request bodies are capped at 1 MB with a 413 (`Settings.max_body_bytes` in
+  `src/app/config.py`, overridable via `WEBSITE_MAX_BODY_BYTES`). The app
   rejects an oversized declared `Content-Length` before routing and counts
   streamed bodies as an endpoint consumes them. The Caddy sidecar enforces
   the same cap at the proxy, which also covers chunked bodies sent to routes

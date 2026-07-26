@@ -16,7 +16,7 @@ import urllib.request
 
 import pytest
 
-from app.main import DOCS_CSP
+from app.middleware import DOCS_CSP
 
 # Every static asset the pages reference, by prefix-relative path.
 ASSETS = (

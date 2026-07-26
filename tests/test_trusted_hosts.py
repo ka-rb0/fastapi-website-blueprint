@@ -2,7 +2,7 @@
 Host-header validation, against the live servers from conftest.py.
 
 The templates build absolute URLs with url_for, which trusts the request's
-Host header - so TrustedHostMiddleware (see TRUSTED_HOSTS in src/app/main.py)
+Host header - so TrustedHostMiddleware (configured in src/app/factory.py)
 must reject hosts outside the allowlist before anything is rendered, or an
 attacker-chosen Host would be reflected into every generated URL.
 """
@@ -14,7 +14,7 @@ from html.parser import HTMLParser
 
 import pytest
 
-from app.main import SECURITY_HEADERS
+from app.middleware import SECURITY_HEADERS
 
 
 def _get_with_host(url: str, host: str) -> urllib.request.Request:

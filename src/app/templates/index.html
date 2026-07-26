@@ -1,4 +1,4 @@
-{#- The homepage - rendered by the `/` route in src/app/main.py. #}
+{#- The homepage - rendered by the `/` route in src/app/routers/pages.py. #}
 {% extends "base.html" %}
 {% block meta %}
   <meta name="description"
@@ -14,7 +14,7 @@
           the script reads them instead of hardcoding a URL, so the generated
           action (url_for honors root_path) keeps the feature working under a
           URL prefix. minlength/maxlength are MIN/MAX_SHOUT_LENGTH from
-          src/app/main.py, injected at render time - the server still
+          src/app/schemas.py, injected at render time - the server still
           validates; these only give instant feedback in the browser.
           `required` stays alongside minlength: an empty value skips
           minlength validation entirely, so required is what actually blocks

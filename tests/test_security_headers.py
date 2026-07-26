@@ -14,26 +14,25 @@ import pytest
 from starlette.middleware.errors import ServerErrorMiddleware
 from starlette.types import Message, Receive, Scope, Send
 
-from app.main import (
-    DOCS_CSP,
-    SECURITY_HEADERS,
-    BodySizeLimitMiddleware,
-    SecurityHeadersMiddleware,
-    app,
-    fastapi_app,
-)
+from app.config import Settings
+from app.factory import create_app
+from app.middleware import DOCS_CSP, SECURITY_HEADERS, SecurityHeadersMiddleware
+from tests.helpers import framework_app
 
 
 def test_app_is_wrapped_outside_the_framework() -> None:
     """
-    The served `app` must be the wrappers, header stamp outermost.
+    Factory-built apps are the wrappers, header stamp outermost.
 
     That ordering is what guarantees headers on ServerErrorMiddleware's 500s
     - and on any response sent while the body-size guard is in the stack.
+    Via create_app, not `from app.main import app`: importing app.main
+    constructs an env-configured app, so a stray shell variable would kill
+    collection of this whole module (docs/ARCHITECTURE.md bans the import
+    for exactly that reason). The entry point itself is exercised by the
+    live-server fixtures, which run `uvicorn app.main:app` in subprocesses.
     """
-    assert isinstance(app, SecurityHeadersMiddleware)
-    assert isinstance(app.app, BodySizeLimitMiddleware)
-    assert app.app.app is fastapi_app
+    framework_app(create_app(Settings()))
 
 
 def _directives(csp: str) -> dict[str, str]:
@@ -44,7 +43,7 @@ def test_docs_csp_relaxes_exactly_scripts_styles_connects_and_images() -> None:
     """
     DOCS_CSP is the strict CSP with exactly four directives loosened.
 
-    Guards the .replace() derivation in app.main: if the strict policy were
+    Guards the derivation in app.middleware: if the strict policy were
     reworded, a silently no-op replace would ship the strict CSP to /docs
     (blank page) - and nothing else may ever diverge between the two.
     """
@@ -65,7 +64,9 @@ async def _crashing_app(scope: Scope, receive: Receive, send: Send) -> None:
 
 def test_headers_on_unhandled_exception_500() -> None:
     """A 500 produced by ServerErrorMiddleware still carries every header."""
-    wrapped = SecurityHeadersMiddleware(ServerErrorMiddleware(_crashing_app))
+    wrapped = SecurityHeadersMiddleware(
+        ServerErrorMiddleware(_crashing_app), docs_enabled=False
+    )
     messages: list[Message] = []
 
     async def receive() -> dict[str, Any]:

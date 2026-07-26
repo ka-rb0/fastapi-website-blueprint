@@ -33,15 +33,19 @@ Run `scripts/lint` and `scripts/test` before declaring work done.
 
 ## Conventions
 
+- Design rationale lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) -
+  read it before simplifying middleware, CSP, error-handling or
+  configuration code; several decisions there exist to prevent regressions
+  that only show up in deployments the test suite cannot fully reproduce.
 - Never compare `scope["path"]` or `request.url.path` against a route string
   (`"/docs"`, `"/api/"`, ...) directly. Both carry `root_path` prepended when
   the app runs behind a reverse proxy (e.g. `uvicorn --root-path /prefix`),
   so a bare string comparison silently breaks under any path-prefixed
   deployment (K8s Ingress, Azure/AWS path-based routing, the dev container's
   Caddy sidecar) while working fine unprefixed - this bit both the CSP
-  middleware and the branded-404 handler in `src/app/main.py`. Always run the
+  middleware and branded-404 handler. Always run the
   path through `get_route_path()` (`from starlette._utils import
-get_route_path` - see the import comment in `src/app/main.py` for why that
+get_route_path` - see the import comment in `src/app/middleware.py` for why that
   private module, not `starlette.routing`'s re-export, is the correct
   import) first, the same reversal FastAPI's own router applies before
   matching routes.

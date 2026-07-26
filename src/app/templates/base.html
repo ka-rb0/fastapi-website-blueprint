@@ -1,7 +1,7 @@
 {#- The shared page skeleton: every page extends this and fills the blocks.
     Values that used to be hand-mirrored are injected instead: the theme-color
-    metas come from css/theme.css and the shout length limits from app.main
-    (all exposed as Jinja globals in src/app/main.py) - no more keeping
+    metas come from css/theme.css and shout limits from app.schemas
+    (all exposed as Jinja globals in src/app/templating.py) - no more keeping
     copies in sync by hand.
 
     Every URL is generated with url_for, never written literally: the 404
@@ -37,7 +37,7 @@
     <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}" />
     {#- Deliberately blocking (no defer/module): re-applies a saved theme
         before first paint so there is no flash. A file, not an inline
-        script, because the CSP (see src/app/main.py) bans inline scripts. #}
+        script, because the CSP (see src/app/middleware.py) bans inline scripts. #}
     <script src="{{ url_for('static', path='js/theme-init.js') }}"></script>
   </head>
   <body>

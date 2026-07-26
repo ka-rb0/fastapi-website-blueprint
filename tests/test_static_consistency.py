@@ -21,7 +21,6 @@ from starlette.requests import Request
 
 from app.config import Settings
 from app.factory import create_app
-from app.middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from app.schemas import MAX_SHOUT_LENGTH, MIN_SHOUT_LENGTH
 from app.templating import theme_css_pair
 from tests.accessibility import (
@@ -30,6 +29,7 @@ from tests.accessibility import (
     contrast_ratio,
     hex_to_rgb,
 )
+from tests.helpers import framework_app
 
 STATIC_DIR = Path(__file__).parent.parent / "src" / "app" / "static"
 
@@ -39,11 +39,7 @@ HEX = r"#[0-9a-fA-F]{6}"
 @pytest.fixture(scope="module")
 def fastapi_app() -> FastAPI:
     """Return the framework app from a default factory build - no server needed."""
-    application = create_app(Settings())
-    assert isinstance(application, SecurityHeadersMiddleware)
-    assert isinstance(application.app, BodySizeLimitMiddleware)
-    assert isinstance(application.app.app, FastAPI)
-    return application.app.app
+    return framework_app(create_app(Settings()))
 
 
 @pytest.fixture(scope="module")

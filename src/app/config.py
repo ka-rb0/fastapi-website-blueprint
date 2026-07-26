@@ -54,8 +54,17 @@ class Settings:
                 f"WEBSITE_MAX_BODY_BYTES must be an integer byte count,"
                 f" got {raw_max_body_bytes!r}"
             ) from None
+        # Strict on purpose: "true"/"yes" silently meaning *off* would be a
+        # deployment footgun, so anything but the documented values refuses
+        # to boot, like every other invalid setting.
+        raw_docs_enabled = values.get("WEBSITE_ENABLE_DOCS", "0")
+        if raw_docs_enabled not in ("0", "1", ""):
+            raise ValueError(
+                f"WEBSITE_ENABLE_DOCS must be '1' (on) or '0'/unset (off),"
+                f" got {raw_docs_enabled!r}"
+            )
         return cls(
-            docs_enabled=values.get("WEBSITE_ENABLE_DOCS") == "1",
+            docs_enabled=raw_docs_enabled == "1",
             trusted_hosts=tuple(
                 values.get(
                     "WEBSITE_TRUSTED_HOSTS", ",".join(DEFAULT_TRUSTED_HOSTS)

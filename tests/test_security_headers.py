@@ -11,29 +11,28 @@ import asyncio
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
 from starlette.middleware.errors import ServerErrorMiddleware
 from starlette.types import Message, Receive, Scope, Send
 
-from app.main import app
-from app.middleware import (
-    DOCS_CSP,
-    SECURITY_HEADERS,
-    BodySizeLimitMiddleware,
-    SecurityHeadersMiddleware,
-)
+from app.config import Settings
+from app.factory import create_app
+from app.middleware import DOCS_CSP, SECURITY_HEADERS, SecurityHeadersMiddleware
+from tests.helpers import framework_app
 
 
 def test_app_is_wrapped_outside_the_framework() -> None:
     """
-    The served `app` must be the wrappers, header stamp outermost.
+    Factory-built apps are the wrappers, header stamp outermost.
 
     That ordering is what guarantees headers on ServerErrorMiddleware's 500s
     - and on any response sent while the body-size guard is in the stack.
+    Via create_app, not `from app.main import app`: importing app.main
+    constructs an env-configured app, so a stray shell variable would kill
+    collection of this whole module (docs/ARCHITECTURE.md bans the import
+    for exactly that reason). The entry point itself is exercised by the
+    live-server fixtures, which run `uvicorn app.main:app` in subprocesses.
     """
-    assert isinstance(app, SecurityHeadersMiddleware)
-    assert isinstance(app.app, BodySizeLimitMiddleware)
-    assert isinstance(app.app.app, FastAPI)
+    framework_app(create_app(Settings()))
 
 
 def _directives(csp: str) -> dict[str, str]:

@@ -3,26 +3,13 @@
 import asyncio
 
 import pytest
-from fastapi import FastAPI
 from starlette.routing import Mount, Route
 from starlette.types import ASGIApp, Message, Scope
 
 from app.config import DEFAULT_MAX_BODY_BYTES, DEFAULT_TRUSTED_HOSTS, Settings
 from app.factory import create_app
-from app.middleware import (
-    DOCS_CSP,
-    SECURITY_HEADERS,
-    BodySizeLimitMiddleware,
-    SecurityHeadersMiddleware,
-)
-
-
-def _framework_app(application: ASGIApp) -> FastAPI:
-    """Return the FastAPI instance after asserting the production wrapper order."""
-    assert isinstance(application, SecurityHeadersMiddleware)
-    assert isinstance(application.app, BodySizeLimitMiddleware)
-    assert isinstance(application.app.app, FastAPI)
-    return application.app.app
+from app.middleware import DOCS_CSP, SECURITY_HEADERS, BodySizeLimitMiddleware
+from tests.helpers import framework_app
 
 
 def _get(
@@ -87,10 +74,8 @@ def test_factory_keeps_application_configurations_isolated() -> None:
 
     docs_app = create_app(docs_settings)
     production_app = create_app(production_settings)
-    assert isinstance(docs_app, SecurityHeadersMiddleware)
-    assert isinstance(production_app, SecurityHeadersMiddleware)
-    docs_framework = _framework_app(docs_app)
-    production_framework = _framework_app(production_app)
+    docs_framework = framework_app(docs_app)
+    production_framework = framework_app(production_app)
 
     assert docs_framework is not production_framework
     assert docs_framework.state.settings is docs_settings
@@ -170,6 +155,19 @@ def test_from_env_names_the_variable_for_a_non_integer_body_cap() -> None:
     """The parse error names WEBSITE_MAX_BODY_BYTES, not just "invalid literal"."""
     with pytest.raises(ValueError, match=r"WEBSITE_MAX_BODY_BYTES.*'1MB'"):
         Settings.from_env({"WEBSITE_MAX_BODY_BYTES": "1MB"})
+
+
+@pytest.mark.parametrize("value", ["true", "yes", "on"])
+def test_from_env_rejects_unrecognized_docs_flag(value: str) -> None:
+    """WEBSITE_ENABLE_DOCS=true silently meaning *off* would be a footgun."""
+    with pytest.raises(ValueError, match=rf"WEBSITE_ENABLE_DOCS.*{value!r}"):
+        Settings.from_env({"WEBSITE_ENABLE_DOCS": value})
+
+
+@pytest.mark.parametrize("value", ["0", ""])
+def test_from_env_accepts_explicit_docs_off(value: str) -> None:
+    """'0' and '' (a compose default that didn't resolve) both mean off."""
+    assert Settings.from_env({"WEBSITE_ENABLE_DOCS": value}).docs_enabled is False
 
 
 @pytest.mark.parametrize(

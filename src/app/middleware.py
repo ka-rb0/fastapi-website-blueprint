@@ -98,6 +98,14 @@ class BodySizeLimitMiddleware:
     Declared sizes are rejected before routing; streamed bodies are counted as
     the downstream endpoint consumes them. A reverse proxy should enforce the
     same limit to cover streams sent to endpoints that never read a body.
+
+    The two rejection paths deliberately produce the same JSON error shape.
+    The pre-routing path sends its response by hand, because no framework has
+    seen the request yet. The streaming path raises HTTPException instead:
+    the raise happens inside the app's own receive() call - i.e. inside the
+    endpoint's body read, within the framework's exception handling - so the
+    413 comes out shaped like any other FastAPI error (a 422, say) even
+    though this wrapper sits outside the framework stack.
     """
 
     def __init__(self, app: ASGIApp, *, max_body_bytes: int) -> None:
@@ -113,6 +121,8 @@ class BodySizeLimitMiddleware:
         # Uvicorn's HTTP parser has already validated Content-Length as an int.
         declared = Headers(scope=scope).get("content-length")
         if declared is not None and int(declared) > self.max_body_bytes:
+            # Hand-rolled, so the {"detail": ...} shape must mirror FastAPI's
+            # error responses by convention - tests/test_api.py asserts it.
             response = JSONResponse(
                 {"detail": f"Request body exceeds {self.max_body_bytes} bytes"},
                 status_code=413,
@@ -130,7 +140,7 @@ class BodySizeLimitMiddleware:
                 if received > self.max_body_bytes:
                     raise StarletteHTTPException(
                         413,
-                        detail=(f"Request body exceeds {self.max_body_bytes} bytes"),
+                        detail=f"Request body exceeds {self.max_body_bytes} bytes",
                     )
             return message
 

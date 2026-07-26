@@ -8,11 +8,20 @@ Each section names the module that implements it.
 ## Composition root (`src/app/factory.py`)
 
 `create_app(settings)` is the only place where configuration, routers,
-templates, middleware and exception handlers meet. Everything it composes
-is either passed in (settings) or created fresh per call (template
-environment, routers with closures), so two `create_app` calls share no
-mutable state - `tests/test_app_factory.py` proves two differently
-configured apps coexist in one process.
+templates, middleware and exception handlers meet. Everything holding
+per-app state is either passed in (settings) or created fresh per call
+(the template environment, the pages router - a closure over its
+templates); the API router is a stateless module-level constant, which is
+safe because `include_router` copies its routes into each app. Two
+`create_app` calls therefore share no mutable state -
+`tests/test_app_factory.py` proves two differently configured apps
+coexist in one process.
+
+`create_app` returns the concrete outermost wrapper
+(`SecurityHeadersMiddleware`), not an opaque `ASGIApp`: the class is
+public API, and the concrete type is what lets tests and embedding code
+unwrap to the FastAPI instance (`framework_app` in `tests/helpers.py`)
+instead of guessing at private attributes.
 
 Importing `app.factory` (or any other module in the package) is
 side-effect free: no environment reads, no logging configuration, no app
@@ -22,7 +31,8 @@ at the executable boundary. Tests and embedding code should import
 `create_app` and never `app.main`.
 
 The wrapper order returned by `create_app` is deliberate and asserted by
-`tests/test_security_headers.py`:
+`framework_app` in `tests/helpers.py`, the unwrap helper every
+in-process test goes through:
 
 ```text
 SecurityHeadersMiddleware        <- outermost: stamps every response
@@ -41,9 +51,11 @@ headers. Wrapping the finished app keeps even those 500s stamped.
 A frozen, slotted dataclass validated in `__post_init__`: an instance
 that exists is safe to build an app from. Invalid configuration
 (no trusted hosts after stripping blanks, non-positive body cap, unknown
-log level) refuses to boot instead of producing a misbehaving server -
-e.g. `WEBSITE_TRUSTED_HOSTS=""` used to start an app that rejected every
-request with a 400; now it fails fast at startup.
+log level, an unrecognized `WEBSITE_ENABLE_DOCS` value) refuses to boot
+instead of producing a misbehaving server - e.g.
+`WEBSITE_TRUSTED_HOSTS=""` used to start an app that rejected every
+request with a 400, and `WEBSITE_ENABLE_DOCS=true` would silently mean
+_off_; now both fail fast at startup.
 
 `Settings.from_env()` accepts an explicit mapping so tests can exercise
 parsing without touching `os.environ`. Defaults are production-safe:
@@ -65,6 +77,12 @@ errors. Highlights of the individual choices:
   deny window handles and cross-origin embedding (tab-nabbing, XS-Leaks,
   Spectre-class side channels) before the app ever has authenticated
   pages to protect.
+- `Referrer-Policy: strict-origin-when-cross-origin` is the modern
+  browser default, made explicit for older browsers whose default
+  (`no-referrer-when-downgrade`) leaks full URLs cross-origin.
+- `Permissions-Policy` opts out of camera, microphone and geolocation:
+  the frontend uses none of them, and the opt-out means embedded content
+  can't use them either.
 
 ### The docs CSP exception
 
@@ -144,6 +162,19 @@ when the selected route never consumes it; the in-app guard is what
 protects a directly exposed container - the distribution image runs
 uvicorn with no proxy of its own.
 
+The two rejection paths deliberately produce the same JSON error shape,
+by different mechanisms. The pre-routing path sends a hand-rolled
+`JSONResponse` (no framework has seen the request yet), so its
+`{"detail": ...}` body mirrors FastAPI's error shape by convention -
+`tests/test_api.py` asserts the parity. The streaming path raises
+`HTTPException` from inside the app's own `receive()` call: the raise
+surfaces inside the endpoint's body read, _within_ the framework's
+exception handling, which is what lets a wrapper sitting outside the
+framework stack produce a framework-shaped 413 (same JSON shape as a
+422). Don't "simplify" the raise into a directly sent response - by the
+time the stream exceeds the cap, the endpoint is mid-request and only
+the framework knows whether a response has already started.
+
 ## Branded 404 (`src/app/exceptions.py`)
 
 Registered on status code `404`, not on `StarletteHTTPException`, so
@@ -153,14 +184,22 @@ mount as well as unmatched routes. `/api` paths fall through to
 FastAPI's default JSON errors: browsers get a page, API clients get
 JSON. The 404 status is preserved - a "soft 404" (branded page with a 200) would make broken links look healthy to crawlers and monitoring.
 
+## Interactive docs gating (`src/app/factory.py`, `Settings.docs_enabled`)
+
+The interactive API docs are a development tool: `/docs` only exists
+when `WEBSITE_ENABLE_DOCS=1` (the devcontainer sets it; production
+should not). The page needs the CSP exceptions above, so keeping it out
+of production also keeps production on the strict policy everywhere.
+`openapi.json` gates on the same flag - the machine-readable schema is a
+dev tool just like the docs UI that consumes it - and ReDoc stays off:
+one docs UI is enough, and each one is its own set of CSP exceptions.
+
 ## Static files (`src/app/factory.py`)
 
 Mounted at `/` **last**, so real routes always take precedence, and
 **without** `html=True`: its `index.html`/`404.html` special-casing
 belonged to an all-static frontend, and misses must instead raise 404s
-for the branded handler above. The docs UI is gated together with
-`openapi.json` (the schema is a dev tool just like the UI consuming it),
-and ReDoc stays off - each docs UI is its own set of CSP exceptions.
+for the branded handler above.
 
 ## Schemas (`src/app/schemas.py`)
 
@@ -181,6 +220,11 @@ differently configured apps.
 
 ## Lifecycle (`src/app/lifecycle.py`)
 
+The lifespan handler is created per app by `create_lifespan(settings)` -
+a closure over its settings, like the pages router, so runtime code
+never reads configuration back off `app.state` (state is an
+introspection point for tests and embedding code only).
+
 Logging is configured at startup, not import: importing the package
 (tests, tooling) must not reconfigure the process-wide root logger.
 Note that `logging.basicConfig` is still process-global and first-wins -
@@ -198,3 +242,11 @@ disabled) are now exercised in-process through `create_app` in
 `tests/test_app_factory.py`; only variants that genuinely need server
 behavior (`--root-path`, proxy headers, trusted hosts against real
 sockets) keep dedicated server fixtures.
+
+In-process tests build apps through `create_app` and unwrap them with
+`framework_app` in `tests/helpers.py`; none import `app.main` - that
+import constructs an app from the shell's environment, so a stray
+variable would kill test collection instead of failing one test. The
+entry point is still covered: the live-server fixtures run
+`uvicorn app.main:app` in subprocesses, and subprocess coverage
+(`patch = ["subprocess"]` in `pyproject.toml`) sees it.

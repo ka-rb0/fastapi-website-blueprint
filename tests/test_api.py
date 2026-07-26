@@ -13,7 +13,18 @@ from app.config import Settings
 from app.middleware import DOCS_CSP, SECURITY_HEADERS
 from app.schemas import MAX_SHOUT_LENGTH
 
-MAX_BODY_BYTES = Settings.from_env().max_body_bytes
+
+@pytest.fixture(scope="module")
+def max_body_bytes() -> int:
+    """
+    Return the live server's body cap (it inherits this shell env - conftest).
+
+    A fixture, not a module-level Settings.from_env(): parsing the shell env
+    at import time would kill collection of every test in this file when a
+    variable is malformed, instead of failing just the body-cap tests with a
+    clear error.
+    """
+    return Settings.from_env().max_body_bytes
 
 
 def _post_json_request(url: str, body: bytes) -> urllib.request.Request:
@@ -61,9 +72,9 @@ def test_shout_rejects_oversized_text(server: str) -> None:
     assert excinfo.value.code == 422
 
 
-def test_oversized_body_rejected(server: str) -> None:
+def test_oversized_body_rejected(server: str, max_body_bytes: int) -> None:
     """
-    A body past MAX_BODY_BYTES is a 413 - the transport-level cap, as JSON.
+    A body past the cap is a 413 - the transport-level limit, as JSON.
 
     Distinct from test_shout_rejects_oversized_text's 422: that field limit
     only applies after the whole body has been received and JSON-decoded, so
@@ -71,7 +82,7 @@ def test_oversized_body_rejected(server: str) -> None:
     declared Content-Length (urllib sets it for bytes) already exceeds the
     cap, so rejection happens without the body being read.
     """
-    body = b'{"text": "' + b"a" * MAX_BODY_BYTES + b'"}'
+    body = b'{"text": "' + b"a" * max_body_bytes + b'"}'
     req = _post_json_request(f"{server}/api/shout", body)
     with pytest.raises(urllib.error.HTTPError) as excinfo:
         urllib.request.urlopen(req, timeout=10)
@@ -84,7 +95,7 @@ def test_oversized_body_rejected(server: str) -> None:
     [("GET", "/api/health"), ("POST", "/no-such-route")],
 )
 def test_oversized_declared_body_rejected_before_routing(
-    server: str, method: str, path: str
+    server: str, method: str, path: str, max_body_bytes: int
 ) -> None:
     """
     An oversized Content-Length is a 413 even when the route won't read a body.
@@ -94,7 +105,7 @@ def test_oversized_declared_body_rejected_before_routing(
     """
     connection = http.client.HTTPConnection(server.removeprefix("http://"), timeout=5)
     connection.putrequest(method, path)
-    connection.putheader("Content-Length", str(MAX_BODY_BYTES + 1))
+    connection.putheader("Content-Length", str(max_body_bytes + 1))
     connection.endheaders()
 
     response = connection.getresponse()
@@ -102,13 +113,13 @@ def test_oversized_declared_body_rejected_before_routing(
         assert response.status == 413
         assert response.headers["Content-Type"] == "application/json"
         assert json.load(response) == {
-            "detail": f"Request body exceeds {MAX_BODY_BYTES} bytes"
+            "detail": f"Request body exceeds {max_body_bytes} bytes"
         }
     finally:
         connection.close()
 
 
-def test_oversized_chunked_body_rejected(server: str) -> None:
+def test_oversized_chunked_body_rejected(server: str, max_body_bytes: int) -> None:
     """
     An oversized chunked upload is cut off with a 413 as it streams.
 
@@ -120,7 +131,7 @@ def test_oversized_chunked_body_rejected(server: str) -> None:
 
     def chunks() -> Iterator[bytes]:
         yield b'{"text": "'
-        for _ in range(MAX_BODY_BYTES // 65536 + 1):
+        for _ in range(max_body_bytes // 65536 + 1):
             yield b"a" * 65536
         yield b'"}'
 

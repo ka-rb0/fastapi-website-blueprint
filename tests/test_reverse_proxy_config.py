@@ -28,10 +28,23 @@ def _example_environment() -> dict[str, str]:
     return values
 
 
+def _assert_declared(environment: dict[str, str], names: set[str]) -> None:
+    """
+    Name the settings the example environment is missing, before any lookup.
+
+    Every lookup below would otherwise raise a bare KeyError naming only the
+    first missing variable, which reads as a broken test rather than an
+    incomplete .env.example.
+    """
+    assert environment.keys() >= names, (
+        f"example environment is missing {sorted(names - environment.keys())}"
+    )
+
+
 def test_reverse_proxy_example_environment_is_complete() -> None:
     """Every required proxy setting is documented with non-conflicting ports."""
     environment = _example_environment()
-    assert environment.keys() >= REVERSE_PROXY_VARIABLES
+    _assert_declared(environment, REVERSE_PROXY_VARIABLES)
 
     root_path = environment["WEBSITE_REVERSE_PROXY_ROOT_PATH"]
     assert root_path.startswith("/")
@@ -41,15 +54,25 @@ def test_reverse_proxy_example_environment_is_complete() -> None:
     port_names = {
         "WEBSITE_EXTERNAL_PORT",
         "WEBSITE_INTERNAL_PORT",
-        "WEBSITE_TEST_PORT",
         *(
             name
             for name in REVERSE_PROXY_VARIABLES
             if name.endswith("PORT_WITH_REVERSE_PROXY")
         ),
     }
+    _assert_declared(environment, port_names)
     ports = [int(environment[name]) for name in port_names]
     assert len(ports) == len(set(ports)), "example environment reuses a port"
+
+    # The whole inclusive test range must stay clear of the single ports -
+    # a port between MIN and MAX collides even though no variable names it.
+    _assert_declared(environment, {"WEBSITE_TEST_PORT_MIN", "WEBSITE_TEST_PORT_MAX"})
+    test_port_min = int(environment["WEBSITE_TEST_PORT_MIN"])
+    test_port_max = int(environment["WEBSITE_TEST_PORT_MAX"])
+    assert test_port_min <= test_port_max, "example test port range is empty"
+    assert not any(test_port_min <= port <= test_port_max for port in ports), (
+        "example environment reuses a port inside the test range"
+    )
 
 
 def _compose() -> dict[str, Any]:
@@ -127,7 +150,7 @@ def test_caddy_caps_request_body_size() -> None:
     """
     The dev proxy enforces the same transport-level body cap as the app.
 
-    Caddy's "1MB" counts 10^6 bytes, matching MAX_BODY_BYTES' default in
+    Caddy's "1MB" counts 10^6 bytes, matching DEFAULT_MAX_BODY_BYTES in
     src/app/config.py - the proxy refuses oversized uploads before uvicorn
     sees them, and the in-app guard covers directly exposed containers.
     """

@@ -62,8 +62,9 @@ handling, ...) is recorded in [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 Declared once and locked everywhere:
 
-- Python packages: the `[dependency-groups]` table of
-  [pyproject.toml](pyproject.toml) (PEP 735), exact versions pinned in
+- Python packages: `[project.dependencies]` (runtime, PEP 621) and the
+  `[dependency-groups]` table (dev tooling, PEP 735) of
+  [pyproject.toml](pyproject.toml), exact versions pinned in
   [uv.lock](uv.lock). Install manually with `uv sync` (runtime + all dev
   tools).
 - npm-based lint tools (prettier, eslint, markdownlint):

@@ -2,10 +2,11 @@
 
 ## Dependencies
 
-- `uv sync` <- everything in the dev group of pyproject.toml, at the exact
-  versions in uv.lock (in the devcontainer this targets the system
-  interpreter - no venv)
-- `uv sync --only-group runtime` <- just what the app needs
+- `uv sync` <- the runtime deps plus everything in the dev group of
+  pyproject.toml, at the exact versions in uv.lock (in the devcontainer this
+  targets the system interpreter - no venv)
+- `uv sync --no-default-groups` <- just what the app needs
+  (`[project.dependencies]`)
 - `uv lock --upgrade` <- refresh uv.lock to the latest versions by hand
   (Dependabot does this weekly)
 - `npm ci` <- prettier + eslint + markdownlint-cli2 at the exact versions in
@@ -30,8 +31,9 @@ The everyday checks (`scripts/lint`, `scripts/test`, ...) are in
 [Test & Lint](TEST_AND_LINT.md); the commands below are for targeted runs.
 
 - `pytest` (from `/workspace`) <- API tests + Playwright E2E in headless
-  Chromium; starts its own uvicorn server on port $WEBSITE_TEST_PORT, so the
-  dev server can stay running
+  Chromium; starts its own uvicorn servers on the inclusive port range
+  $WEBSITE_TEST_PORT_MIN..$WEBSITE_TEST_PORT_MAX, so the dev server can stay
+  running
 - `pytest tests/test_api.py` <- skips the slower E2E suite
 - `pytest --cov` <- what CI runs: adds app coverage (uvicorn subprocess
   included) and fails under the threshold in `[tool.coverage.report]`

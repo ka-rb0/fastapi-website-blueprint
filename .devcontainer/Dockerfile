@@ -23,15 +23,16 @@ COPY --from=uv /uv /uvx /usr/local/bin/
 # the Python images on base-image updates) instead of drifting in unpinned at
 # build time - merge those weekly PRs promptly.
 
-# Install the runtime Python packages at the exact versions in uv.lock (the
-# single source of truth) into the system interpreter - no venv indirection
-# inside a container. Bind mounts (BuildKit) keep the lockfiles out of image
-# layers. --inexact keeps what uv didn't install (pip). ENV, not ARG: child
-# stages run uv sync against the same environment.
+# Install the runtime Python packages ([project.dependencies], which
+# --no-default-groups narrows the sync to) at the exact versions in uv.lock
+# (the single source of truth) into the system interpreter - no venv
+# indirection inside a container. Bind mounts (BuildKit) keep the lockfiles
+# out of image layers. --inexact keeps what uv didn't install (pip). ENV,
+# not ARG: child stages run uv sync against the same environment.
 ENV UV_PROJECT_ENVIRONMENT=/usr/local
 RUN --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     --mount=type=bind,source=uv.lock,target=uv.lock \
-    uv sync --locked --no-cache --inexact --only-group runtime
+    uv sync --locked --no-cache --inexact --no-default-groups
 
 # The dev and agent stages form the desktop-development branch. The
 # distribution stage below branches directly from base, so BuildKit skips all

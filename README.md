@@ -45,6 +45,12 @@ Human developers use Visual Studio Code with Dev Containers.
 AI assistants run directly in the Dev Container and are allowed to install
 and modify anything inside the ephemeral container as they please.
 
+The Python application uses an explicit composition root:
+`app.create_app(Settings(...))` creates an independent ASGI application,
+while `app.main:app` is the environment-configured Uvicorn entry point.
+Configuration, lifecycle, middleware, schemas, templates, exception handlers,
+and routers live in focused modules under `src/app`.
+
 ## Commands
 
 - For a list of common commands, see [CHEATSHEET.md](docs/CHEATSHEET.md).

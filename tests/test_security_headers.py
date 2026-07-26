@@ -11,16 +11,16 @@ import asyncio
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
 from starlette.middleware.errors import ServerErrorMiddleware
 from starlette.types import Message, Receive, Scope, Send
 
-from app.main import (
+from app.main import app
+from app.middleware import (
     DOCS_CSP,
     SECURITY_HEADERS,
     BodySizeLimitMiddleware,
     SecurityHeadersMiddleware,
-    app,
-    fastapi_app,
 )
 
 
@@ -33,7 +33,7 @@ def test_app_is_wrapped_outside_the_framework() -> None:
     """
     assert isinstance(app, SecurityHeadersMiddleware)
     assert isinstance(app.app, BodySizeLimitMiddleware)
-    assert app.app.app is fastapi_app
+    assert isinstance(app.app.app, FastAPI)
 
 
 def _directives(csp: str) -> dict[str, str]:
@@ -44,7 +44,7 @@ def test_docs_csp_relaxes_exactly_scripts_styles_connects_and_images() -> None:
     """
     DOCS_CSP is the strict CSP with exactly four directives loosened.
 
-    Guards the .replace() derivation in app.main: if the strict policy were
+    Guards the derivation in app.middleware: if the strict policy were
     reworded, a silently no-op replace would ship the strict CSP to /docs
     (blank page) - and nothing else may ever diverge between the two.
     """
@@ -65,7 +65,9 @@ async def _crashing_app(scope: Scope, receive: Receive, send: Send) -> None:
 
 def test_headers_on_unhandled_exception_500() -> None:
     """A 500 produced by ServerErrorMiddleware still carries every header."""
-    wrapped = SecurityHeadersMiddleware(ServerErrorMiddleware(_crashing_app))
+    wrapped = SecurityHeadersMiddleware(
+        ServerErrorMiddleware(_crashing_app), docs_enabled=False
+    )
     messages: list[Message] = []
 
     async def receive() -> dict[str, Any]:

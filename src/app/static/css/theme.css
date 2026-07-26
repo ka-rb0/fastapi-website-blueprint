@@ -16,7 +16,7 @@
 :root {
   /* This file is the single source of truth for these values: the page
      templates get --bg injected for their <meta name="theme-color"> tags
-     (theme_css_pair in src/app/main.py parses it from here). Only
+     (theme_css_pair in src/app/templating.py parses it from here). Only
      favicon.svg still mirrors a value by hand (--accent) - SVG isn't
      templated. Re-theming? Update the favicon too. The consistency tests
      enforce matching accent color and WCAG AA contrast for every text and 

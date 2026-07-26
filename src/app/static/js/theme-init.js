@@ -1,7 +1,7 @@
 // Re-apply a previously chosen theme before first paint to avoid a flash.
 // Loaded as a classic blocking script in <head> on purpose: it must run
 // before <body> renders. A separate file rather than an inline <script>
-// because the CSP (see src/app/main.py) allows only same-origin script
+// because the CSP (see src/app/middleware.py) allows only same-origin script
 // files - no inline scripts. Without a saved choice, data-theme stays unset
 // and the CSS follows the OS scheme (see css/theme.css).
 try {

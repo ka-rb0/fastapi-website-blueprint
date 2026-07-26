@@ -3,8 +3,8 @@ Guards for the values the rendered pages derive from their sources of truth.
 
 The templates no longer mirror anything by hand: the <meta name="theme-color">
 tags get --bg from css/theme.css and the shout input's minlength/maxlength get
-MIN/MAX_SHOUT_LENGTH from app.main, all injected as Jinja globals (see
-src/app/main.py). These tests render the templates and check the injected
+MIN/MAX_SHOUT_LENGTH from app.schemas, all injected as Jinja globals (see
+src/app/templating.py). These tests render the templates and check the injected
 values against the sources, so a broken pipeline (dropped meta tag, hardcoded
 value, reworded CSS the parser misses) fails loudly. favicon.svg is the one
 file that still mirrors a token by hand - SVG isn't templated. Pure
@@ -15,15 +15,14 @@ import re
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
 from starlette.requests import Request
 
-from app.main import (
-    MAX_SHOUT_LENGTH,
-    MIN_SHOUT_LENGTH,
-    fastapi_app,
-    templates,
-    theme_css_pair,
-)
+from app.config import Settings
+from app.factory import create_app
+from app.middleware import BodySizeLimitMiddleware
+from app.schemas import MAX_SHOUT_LENGTH, MIN_SHOUT_LENGTH
+from app.templating import theme_css_pair
 from tests.accessibility import (
     NON_TEXT_CONTRAST_MINIMUM,
     TEXT_CONTRAST_MINIMUM,
@@ -35,12 +34,18 @@ STATIC_DIR = Path(__file__).parent.parent / "src" / "app" / "static"
 
 HEX = r"#[0-9a-fA-F]{6}"
 
+application = create_app(Settings())
+assert isinstance(application.app, BodySizeLimitMiddleware)
+assert isinstance(application.app.app, FastAPI)
+fastapi_app = application.app.app
+templates = fastapi_app.state.templates
+
 
 def _token(name: str) -> tuple[str, str]:
     """
     Return the (light, dark) hex pair of a token in css/theme.css.
 
-    Deliberately its own parse rather than calling app.main's theme_css_pair:
+    Deliberately its own parse rather than calling app.templating.theme_css_pair:
     comparing the app's values against the app's own parser would be circular.
     """
     css = (STATIC_DIR / "css" / "theme.css").read_text()

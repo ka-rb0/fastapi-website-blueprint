@@ -18,8 +18,8 @@ https://proxy.localhost {
 	tls internal
 
 	# Transport-level request-body cap at the trusted proxy, mirroring the
-	# app's own guard (MAX_BODY_BYTES in src/app/main.py - Caddy's "1MB" is
-	# the same 10^6 bytes): oversized uploads are refused here before they
+	# app's own guard (DEFAULT_MAX_BODY_BYTES in src/app/config.py - Caddy's
+	# "1MB" is the same 10^6 bytes): oversized uploads are refused here before they
 	# reach uvicorn. One global cap, deliberately not per-endpoint - new form
 	# fields never need a matching proxy change.
 	request_body {

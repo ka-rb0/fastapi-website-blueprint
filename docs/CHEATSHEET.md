@@ -30,8 +30,9 @@ The everyday checks (`scripts/lint`, `scripts/test`, ...) are in
 [Test & Lint](TEST_AND_LINT.md); the commands below are for targeted runs.
 
 - `pytest` (from `/workspace`) <- API tests + Playwright E2E in headless
-  Chromium; starts its own uvicorn server on port $WEBSITE_TEST_PORT, so the
-  dev server can stay running
+  Chromium; starts its own uvicorn servers on the inclusive port range
+  $WEBSITE_TEST_PORT_MIN..$WEBSITE_TEST_PORT_MAX, so the dev server can stay
+  running
 - `pytest tests/test_api.py` <- skips the slower E2E suite
 - `pytest --cov` <- what CI runs: adds app coverage (uvicorn subprocess
   included) and fails under the threshold in `[tool.coverage.report]`

@@ -1,10 +1,10 @@
 """
 Shared fixtures: live uvicorn servers, started once per session.
 
-The servers listen on $WEBSITE_TEST_PORT and selected ports above it (falling
-back to 20177, e.g. in CI) so the dev server on $WEBSITE_INTERNAL_PORT can
-stay up. No httpx / TestClient dependency - API tests hit the live servers
-with urllib.
+The servers listen on consecutive ports from the inclusive range
+$WEBSITE_TEST_PORT_MIN..$WEBSITE_TEST_PORT_MAX (falling back to 20177..20179,
+e.g. in CI) so the dev server on $WEBSITE_INTERNAL_PORT can stay up. No
+httpx / TestClient dependency - API tests hit the live servers with urllib.
 """
 
 import os
@@ -21,10 +21,24 @@ from pathlib import Path
 import pytest
 
 SRC_DIR = Path(__file__).parent.parent / "src"
-# The first port of the range the fixtures below use ($WEBSITE_TEST_PORT
-# itself for `server`, +2 for `prefixed_server`, +3 for
-# `trusted_hosts_server`). Factory-only configuration variants need no server.
-BASE_PORT = int(os.environ.get("WEBSITE_TEST_PORT", "20177"))
+# The inclusive port range the server fixtures below draw from, one
+# consecutive port per fixture (allocated through _test_port). Factory-only
+# configuration variants need no server - and no port.
+PORT_MIN = int(os.environ.get("WEBSITE_TEST_PORT_MIN", "20177"))
+PORT_MAX = int(os.environ.get("WEBSITE_TEST_PORT_MAX", "20179"))
+
+
+def _test_port(offset: int) -> int:
+    """Return the offset-th port of the configured range, refusing to leave it."""
+    port = PORT_MIN + offset
+    if not PORT_MIN <= port <= PORT_MAX:
+        raise RuntimeError(
+            f"test server port {port} is outside the configured"
+            f" WEBSITE_TEST_PORT_MIN..WEBSITE_TEST_PORT_MAX range"
+            f" ({PORT_MIN}..{PORT_MAX}) - widen the range to add"
+            " another server fixture"
+        )
+    return port
 
 
 @contextmanager
@@ -89,14 +103,14 @@ def server() -> Iterator[str]:
     # code's default, not whatever the shell carries (the dev container's
     # compose environment sets the variable).
     env = {k: v for k, v in os.environ.items() if k != "WEBSITE_TRUSTED_HOSTS"}
-    with _run_server(BASE_PORT, {**env, "WEBSITE_ENABLE_DOCS": "1"}) as base_url:
+    with _run_server(_test_port(0), {**env, "WEBSITE_ENABLE_DOCS": "1"}) as base_url:
         yield base_url
 
 
 @pytest.fixture(scope="session")
 def prefixed_server() -> Iterator[str]:
     """
-    Start a server deployed under the URL prefix /prefix, two ports up.
+    Start a server deployed under the URL prefix /prefix, one port up.
 
     --root-path is uvicorn's stand-in for a reverse proxy that mounts the app
     at /prefix and strips the prefix before forwarding: requests arrive at
@@ -110,7 +124,7 @@ def prefixed_server() -> Iterator[str]:
     tests/test_url_prefix.py.
     """
     with _run_server(
-        BASE_PORT + 2,
+        _test_port(1),
         {**os.environ, "WEBSITE_ENABLE_DOCS": "1"},
         ("--root-path", "/prefix"),
     ) as base_url:
@@ -120,7 +134,7 @@ def prefixed_server() -> Iterator[str]:
 @pytest.fixture(scope="session")
 def trusted_hosts_server() -> Iterator[str]:
     """
-    Start a server with an explicit WEBSITE_TRUSTED_HOSTS allowlist, three ports up.
+    Start a server with an explicit WEBSITE_TRUSTED_HOSTS allowlist, two ports up.
 
     site.example stands in for a deployment's public host name (the Host a
     reverse proxy forwards). 127.0.0.1 stays in the list, exactly as the
@@ -130,7 +144,7 @@ def trusted_hosts_server() -> Iterator[str]:
     unhealthy.
     """
     with _run_server(
-        BASE_PORT + 3,
+        _test_port(2),
         {**os.environ, "WEBSITE_TRUSTED_HOSTS": "127.0.0.1,site.example"},
     ) as base_url:
         yield base_url

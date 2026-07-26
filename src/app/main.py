@@ -32,8 +32,9 @@ from pydantic import BaseModel, Field
 # has this name in scope, but only via an implicit re-export with no __all__
 # guarding it - this repo's mypy strict setting rejects relying on that.)
 from starlette._utils import get_route_path
-from starlette.datastructures import MutableHeaders
+from starlette.datastructures import Headers, MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -88,6 +89,28 @@ fastapi_app = FastAPI(
     # exceptions.
     redoc_url=None,
 )
+
+# Host-header allowlist - Starlette's recommended guard against Host-header
+# attacks. Every URL the templates emit comes from url_for, which builds
+# absolute URLs from the request's Host header, so without this an arbitrary
+# Host would be reflected into the rendered asset and form URLs. Harmless
+# while nothing consumes those URLs downstream, dangerous the moment a cache,
+# account e-mail, or absolute redirect is built on top of this blueprint -
+# so the guard ships now, not then. The default trusts only local development
+# names; a production deployment must set WEBSITE_TRUSTED_HOSTS to its public
+# host name(s), comma-separated ("*.example.com" wildcards work). Keep
+# 127.0.0.1 in any override: the distribution image's HEALTHCHECK and the
+# test suite's readiness polls probe it. Requests from other hosts get a
+# plain 400 - still stamped with the security headers, because the
+# SecurityHeadersMiddleware wrapper at the bottom sits outside this.
+TRUSTED_HOSTS = [
+    host.strip()
+    for host in os.environ.get("WEBSITE_TRUSTED_HOSTS", "localhost,127.0.0.1").split(
+        ","
+    )
+    if host.strip()
+]
+fastapi_app.add_middleware(TrustedHostMiddleware, allowed_hosts=TRUSTED_HOSTS)
 
 # Defense-in-depth headers on every response (static files and API alike).
 # The CSP allows only same-origin resources, which matches the self-contained
@@ -212,6 +235,70 @@ class SecurityHeadersMiddleware:
         await self.app(scope, receive, send_with_headers)
 
 
+# One transport-level cap for every endpoint, not a per-field ceiling: field
+# limits like MAX_SHOUT_LENGTH below only apply after FastAPI has received
+# and JSON-decoded the entire body, so on their own a client could stream an
+# arbitrarily large request into memory. 1 MB (10^6 bytes - the same count
+# Caddy's "1MB" means in .devcontainer/Caddyfile, which mirrors this cap at
+# the dev proxy) is far above any form on the site; raise it deliberately
+# when an endpoint really needs more, e.g. file uploads.
+MAX_BODY_BYTES = int(os.environ.get("WEBSITE_MAX_BODY_BYTES", "1000000"))
+
+
+class BodySizeLimitMiddleware:
+    """
+    Pure ASGI guard: request bodies over MAX_BODY_BYTES get a 413.
+
+    A reverse proxy should enforce the same cap in front (the development
+    Caddyfile does), but this guard is what protects a directly exposed
+    container - the distribution image runs uvicorn with no proxy of its own.
+
+    Wraps `receive`, not `send`: a body with an oversized declared
+    Content-Length fails on the app's first read without consuming a byte,
+    and chunked or lying uploads are counted as they stream and cut off at
+    the first byte past the limit. Raising HTTPException (rather than
+    sending a response here) hands the 413 to the framework's exception
+    handling, so API clients get the same JSON error shape as a 422. The
+    raise happens inside the app's own receive() call, which is what makes
+    that work even though this wrapper sits outside the framework stack.
+    """
+
+    def __init__(self, app: ASGIApp, max_body_bytes: int = MAX_BODY_BYTES) -> None:
+        """Wrap `app`, the downstream ASGI app receiving every request."""
+        self.app = app
+        self.max_body_bytes = max_body_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # int() without try/except: uvicorn's HTTP parser has already
+        # rejected requests whose Content-Length is not a valid integer.
+        declared = Headers(scope=scope).get("content-length")
+        too_large_by_declaration = (
+            declared is not None and int(declared) > self.max_body_bytes
+        )
+        received = 0
+
+        async def guarded_receive() -> Message:
+            nonlocal received
+            if too_large_by_declaration:
+                raise StarletteHTTPException(
+                    413, detail=f"Request body exceeds {self.max_body_bytes} bytes"
+                )
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_body_bytes:
+                    raise StarletteHTTPException(
+                        413, detail=f"Request body exceeds {self.max_body_bytes} bytes"
+                    )
+            return message
+
+        await self.app(scope, guarded_receive, send)
+
+
 MIN_SHOUT_LENGTH = 1
 MAX_SHOUT_LENGTH = 1000
 
@@ -294,5 +381,8 @@ async def branded_404(request: Request, exc: StarletteHTTPException) -> Response
 fastapi_app.mount("/", StaticFiles(directory=STATIC_DIR), name="static")
 
 # The ASGI app uvicorn serves (`app.main:app`): the FastAPI stack wrapped so
-# security headers land on every response, framework-generated 500s included.
-app = SecurityHeadersMiddleware(fastapi_app)
+# security headers land on every response, framework-generated 500s included,
+# and no request can stream more than MAX_BODY_BYTES into memory. Headers
+# outermost: the body guard never sends a response itself, but keeping the
+# header stamp on the outside is what guarantees it covers everything.
+app = SecurityHeadersMiddleware(BodySizeLimitMiddleware(fastapi_app))

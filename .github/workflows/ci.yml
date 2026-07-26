@@ -110,9 +110,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Blocks PRs that introduce dependencies with known vulnerabilities (same
+  # Flags PRs that introduce dependencies with known vulnerabilities (same
   # high bar as the npm audit step). Diff-based - it compares the PR against
   # the base - so it only exists on pull_request events.
+  # Advisory, deliberately: the imported ruleset
+  # (.github/rulesets/protect-main.json) requires only lint and test, so a
+  # red run here shows on the PR but does not block the merge. The lockfile
+  # audits in the required lint job already fail on vulnerable *pinned*
+  # dependencies, and staying non-required keeps an escape hatch for merging
+  # past a known, accepted advisory.
   # Free for public repos. If you clone/fork this repo and make it PRIVATE,
   # delete this job (or buy GitHub Advanced Security): without GHAS the API
   # this action needs is unavailable on private repos and the job fails.

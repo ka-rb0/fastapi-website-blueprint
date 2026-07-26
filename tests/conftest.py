@@ -23,7 +23,7 @@ import pytest
 SRC_DIR = Path(__file__).parent.parent / "src"
 # The first port of the range the fixtures below use ($WEBSITE_TEST_PORT
 # itself for `server`, +1 for `docs_disabled_server`, +2 for
-# `prefixed_server`).
+# `prefixed_server`, +3 for `trusted_hosts_server`).
 BASE_PORT = int(os.environ.get("WEBSITE_TEST_PORT", "20177"))
 
 
@@ -84,8 +84,12 @@ def _run_server(
 def server() -> Iterator[str]:
     """Start the server most tests hit, once per session."""
     # Docs on, explicitly: the suite tests the /docs page and its CSP
-    # exception, so it must not depend on the shell's environment.
-    with _run_server(BASE_PORT, {**os.environ, "WEBSITE_ENABLE_DOCS": "1"}) as base_url:
+    # exception, so it must not depend on the shell's environment. And
+    # WEBSITE_TRUSTED_HOSTS unset, so the host allowlist under test is the
+    # code's default, not whatever the shell carries (the dev container's
+    # compose environment sets the variable).
+    env = {k: v for k, v in os.environ.items() if k != "WEBSITE_TRUSTED_HOSTS"}
+    with _run_server(BASE_PORT, {**env, "WEBSITE_ENABLE_DOCS": "1"}) as base_url:
         yield base_url
 
 
@@ -122,5 +126,24 @@ def prefixed_server() -> Iterator[str]:
         BASE_PORT + 2,
         {**os.environ, "WEBSITE_ENABLE_DOCS": "1"},
         ("--root-path", "/prefix"),
+    ) as base_url:
+        yield base_url
+
+
+@pytest.fixture(scope="session")
+def trusted_hosts_server() -> Iterator[str]:
+    """
+    Start a server with an explicit WEBSITE_TRUSTED_HOSTS allowlist, three ports up.
+
+    site.example stands in for a deployment's public host name (the Host a
+    reverse proxy forwards). 127.0.0.1 stays in the list, exactly as the
+    variable's documentation demands: the readiness poll in _run_server
+    probes it, mirroring the distribution image's HEALTHCHECK - dropping it
+    would hang this fixture the same way it would mark that container
+    unhealthy.
+    """
+    with _run_server(
+        BASE_PORT + 3,
+        {**os.environ, "WEBSITE_TRUSTED_HOSTS": "127.0.0.1,site.example"},
     ) as base_url:
         yield base_url

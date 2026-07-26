@@ -121,3 +121,23 @@ def test_caddy_strips_configured_prefix_to_second_uvicorn_listener() -> None:
     )
     assert "tls internal" in caddyfile
     assert "auto_https disable_redirects" in caddyfile
+
+
+def test_caddy_caps_request_body_size() -> None:
+    """
+    The dev proxy enforces the same transport-level body cap as the app.
+
+    Caddy's "1MB" counts 10^6 bytes, matching MAX_BODY_BYTES' default in
+    src/app/main.py - the proxy refuses oversized uploads before uvicorn
+    sees them, and the in-app guard covers directly exposed containers.
+    """
+    caddyfile = (DEVCONTAINER_DIR / "Caddyfile").read_text()
+    assert "request_body {" in caddyfile
+    assert "max_size 1MB" in caddyfile
+
+
+def test_compose_trusts_the_proxy_host() -> None:
+    """The dev container's host allowlist includes Caddy's public site name."""
+    environment = _compose_services()["master"]["environment"]
+    trusted = environment["WEBSITE_TRUSTED_HOSTS"]
+    assert "proxy.localhost" in trusted

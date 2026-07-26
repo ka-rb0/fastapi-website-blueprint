@@ -17,6 +17,15 @@ https://proxy.localhost {
 	# root certificate once; see .devcontainer/README.md.
 	tls internal
 
+	# Transport-level request-body cap at the trusted proxy, mirroring the
+	# app's own guard (MAX_BODY_BYTES in src/app/main.py - Caddy's "1MB" is
+	# the same 10^6 bytes): oversized uploads are refused here before they
+	# reach uvicorn. One global cap, deliberately not per-endpoint - new form
+	# fields never need a matching proxy change.
+	request_body {
+		max_size 1MB
+	}
+
 	# Keep the canonical public root path slash-terminated.
 	@root_path path {$WEBSITE_REVERSE_PROXY_ROOT_PATH}
 	redir @root_path {$WEBSITE_REVERSE_PROXY_ROOT_PATH}/ 308

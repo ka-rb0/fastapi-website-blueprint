@@ -13,7 +13,9 @@ const shoutButton = shoutForm.querySelector("button[type=submit]");
 const shoutOutput = document.querySelector("#shout-output");
 
 shoutForm.addEventListener("submit", async (event) => {
-  event.preventDefault(); // stay on the page instead of a full-page GET submit
+  // Stay on the page: the native submission this replaces would be a
+  // full-page form-encoded POST, which the JSON-only endpoint rejects.
+  event.preventDefault();
   // One request at a time: overlapping submits could resolve out of order
   // and leave a stale reply on screen.
   shoutButton.disabled = true;
@@ -39,3 +41,9 @@ shoutForm.addEventListener("submit", async (event) => {
     shoutButton.disabled = false;
   }
 });
+
+// The form ships hidden (see templates/index.html) - without JS its native
+// submission would hit the JSON-only endpoint with form-encoded data and land
+// on a 422 error page. Reveal it only now that the handler above owns
+// submission, the same pattern as the theme switch in js/theme-switch.js.
+shoutForm.hidden = false;

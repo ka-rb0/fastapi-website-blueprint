@@ -50,11 +50,13 @@ uvicorn app.main:app \
   IP - not the phone's - or use `"*"` while developing (see
   `.devcontainer/.env.example`).
 - Request bodies are capped at 1 MB with a 413 (`MAX_BODY_BYTES` in
-  `src/app/main.py`, overridable via `WEBSITE_MAX_BODY_BYTES`); the Caddy
-  sidecar enforces the same cap at the proxy. Per-field limits like the
-  shout form's `maxlength` only apply after a whole body has been received,
-  so the byte cap is what actually bounds memory - raise it deliberately
-  when an endpoint needs more.
+  `src/app/main.py`, overridable via `WEBSITE_MAX_BODY_BYTES`). The app
+  rejects an oversized declared `Content-Length` before routing and counts
+  streamed bodies as an endpoint consumes them. The Caddy sidecar enforces
+  the same cap at the proxy, which also covers chunked bodies sent to routes
+  that never read them. Per-field limits like the shout form's `maxlength`
+  only apply after a whole body has been received, so raise either limit
+  deliberately when an endpoint needs more.
 - `--forwarded-allow-ips="$WEBSITE_REVERSE_PROXY_TRUSTED_IP"` defaults to
   Caddy's pinned Compose-network address (see `docker-compose.yml`), not
   `*`: uvicorn only honors X-Forwarded-For/X-Forwarded-Proto from that one

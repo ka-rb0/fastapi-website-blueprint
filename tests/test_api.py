@@ -1,5 +1,6 @@
 """API tests against the live uvicorn server (see conftest.py)."""
 
+import http.client
 import json
 import re
 import urllib.error
@@ -72,6 +73,35 @@ def test_oversized_body_rejected(server: str) -> None:
         urllib.request.urlopen(req, timeout=10)
     assert excinfo.value.code == 413
     assert excinfo.value.headers["Content-Type"] == "application/json"
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [("GET", "/api/health"), ("POST", "/no-such-route")],
+)
+def test_oversized_declared_body_rejected_before_routing(
+    server: str, method: str, path: str
+) -> None:
+    """
+    An oversized Content-Length is a 413 even when the route won't read a body.
+
+    Send only the headers: this proves the middleware neither waits for the
+    declared bytes nor calls into routing before rejecting the request.
+    """
+    connection = http.client.HTTPConnection(server.removeprefix("http://"), timeout=5)
+    connection.putrequest(method, path)
+    connection.putheader("Content-Length", str(MAX_BODY_BYTES + 1))
+    connection.endheaders()
+
+    response = connection.getresponse()
+    try:
+        assert response.status == 413
+        assert response.headers["Content-Type"] == "application/json"
+        assert json.load(response) == {
+            "detail": f"Request body exceeds {MAX_BODY_BYTES} bytes"
+        }
+    finally:
+        connection.close()
 
 
 def test_oversized_chunked_body_rejected(server: str) -> None:

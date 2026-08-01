@@ -76,6 +76,13 @@ jobs:
       packages: write
       id-token: write # mint the OIDC token Sigstore signs the attestations with
       attestations: write # persist the attestations to this repository
+      # Lets actions/attest write an Artifact Metadata storage record for the
+      # pushed digest. That API is org-scoped
+      # (POST /orgs/{owner}/artifacts/metadata/storage-record), so under a
+      # user account the action detects the non-org owner and skips the call:
+      # the grant is inert here, kept so this keeps working if the repo moves
+      # under an organization, where the records surface at
+      # https://github.com/orgs/<org>/artifacts.
       artifact-metadata: write # list the image on the repo's artifacts page
     # Consumed by the verify job, which re-fetches the image from the registry
     # rather than trusting anything left behind in this job.
@@ -245,6 +252,14 @@ jobs:
   # both signatures, boot the container, hit the health endpoint. A push that
   # publishes an unbootable or unverifiable image fails here rather than in
   # somebody's deployment.
+  #
+  # The trade-off is that this runs after the tags already moved: the publish
+  # job pushes :latest (or :main) and only then attests, so an image that
+  # fails here has been the default pull for the length of this job. Closing
+  # that window means publishing the digest untagged and moving the tags in a
+  # third job once verification passes - which the tag list and the labels
+  # above, both derived at build time, are not currently shaped for. Failing
+  # loudly and re-publishing over a bad tag is an acceptable compromise for now.
   verify:
     needs: publish
     if: github.event_name == 'push'

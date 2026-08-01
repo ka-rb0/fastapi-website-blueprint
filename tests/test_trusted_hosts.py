@@ -1,20 +1,24 @@
 """
 Host-header validation, against the live servers from conftest.py.
 
-The templates build absolute URLs with url_for, which trusts the request's
-Host header - so TrustedHostMiddleware (configured in src/app/factory.py)
-must reject hosts outside the allowlist before anything is rendered, or an
-attacker-chosen Host would be reflected into every generated URL.
+The homepage's canonical link is absolute (see tests/test_url_generation.py),
+and url_for builds it from the request's Host header - so an unlisted Host
+would be reflected into the address this site tells search engines to index.
+TrustedHostMiddleware (configured in src/app/factory.py) rejects those
+requests before anything is rendered.
+
+The rest of the page carries no origin at all, so the canonical link is both
+the reason this guard exists and the only place its absence would show.
 """
 
 import urllib.error
-import urllib.parse
 import urllib.request
-from html.parser import HTMLParser
 
 import pytest
 
 from app.middleware import SECURITY_HEADERS
+
+from .helpers import emitted_urls
 
 
 def _get_with_host(url: str, host: str) -> urllib.request.Request:
@@ -22,29 +26,12 @@ def _get_with_host(url: str, host: str) -> urllib.request.Request:
     return urllib.request.Request(url, headers={"Host": host})
 
 
-class _UrlAttributeCollector(HTMLParser):
-    """Collect every URL-bearing attribute value (href/src/action) of a page."""
-
-    _URL_ATTRIBUTES = frozenset({"action", "href", "src"})
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.urls: list[str] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        self.urls += [
-            value
-            for name, value in attrs
-            if name in self._URL_ATTRIBUTES and value is not None
-        ]
-
-
 def _generated_origins(html: str) -> set[tuple[str, str]]:
     """
     Return the (scheme, host:port) origin of every absolute URL the page emits.
 
-    Parsed with urlsplit rather than matched as a substring of the page:
-    `"http://site.example/" in html` also passes on a URL that merely
+    Parsed (EmittedUrl.origin) rather than matched as a substring of the
+    page: `"http://site.example/" in html` also passes on a URL that merely
     *contains* the trusted host somewhere else in it - say
     http://attacker.example/?next=http://site.example/ - so it would not
     actually prove the pages were built for the trusted host. That is the
@@ -52,14 +39,7 @@ def _generated_origins(html: str) -> set[tuple[str, str]]:
     string http://site.example/ may be at an arbitrary position in the
     sanitized URL"); comparing parsed origins is the check it asks for.
     """
-    collector = _UrlAttributeCollector()
-    collector.feed(html)
-    origins = set()
-    for url in collector.urls:
-        parts = urllib.parse.urlsplit(url)
-        if parts.scheme or parts.netloc:  # relative URLs carry no host to check
-            origins.add((parts.scheme, parts.netloc))
-    return origins
+    return {emitted.origin for emitted in emitted_urls(html) if emitted.names_an_origin}
 
 
 @pytest.mark.parametrize("host", ["localhost", "127.0.0.1"])
@@ -73,8 +53,9 @@ def test_unknown_host_rejected_before_rendering(server: str) -> None:
     """
     A request with an untrusted Host gets a 400 and no rendered page.
 
-    Rendering would reflect the attacker-chosen host into url_for-generated
-    asset and form URLs - the body must not contain it.
+    The rejection happens before rendering, so the attacker-chosen host
+    reaches no template and lands in no canonical link - the body must not
+    contain it.
     """
     with pytest.raises(urllib.error.HTTPError) as excinfo:
         urllib.request.urlopen(_get_with_host(server, "attacker.example"), timeout=5)
@@ -96,12 +77,18 @@ def test_rejection_carries_security_headers(server: str) -> None:
         assert excinfo.value.headers[name] == value
 
 
-def test_configured_public_host_accepted(trusted_hosts_server: str) -> None:
+def test_only_a_trusted_host_reaches_the_canonical_link(
+    trusted_hosts_server: str,
+) -> None:
     """
-    WEBSITE_TRUSTED_HOSTS admits the deployment's public host name.
+    The trusted host is the only origin a rendered page names.
 
-    site.example plays the Host a reverse proxy would forward; every URL the
-    page generates carries it - reflection is fine once the host is trusted.
+    WEBSITE_TRUSTED_HOSTS admits the deployment's public host name, and
+    site.example plays the Host a reverse proxy forwards. Reflecting it is
+    the point - the canonical link has to name the site's real address - and
+    is safe precisely because the allowlist decided which hosts get that far.
+    The set comparison also pins the other half: no *second* origin sneaks
+    into the page, so a future absolute URL cannot quietly escape this guard.
     """
     request = _get_with_host(trusted_hosts_server, "site.example")
     with urllib.request.urlopen(request, timeout=5) as resp:

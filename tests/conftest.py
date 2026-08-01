@@ -2,9 +2,9 @@
 Shared fixtures: live uvicorn servers, started once per session.
 
 The servers listen on consecutive ports from the inclusive range
-$WEBSITE_TEST_PORT_MIN..$WEBSITE_TEST_PORT_MAX (falling back to 20177..20179,
-e.g. in CI) so the dev server on $WEBSITE_INTERNAL_PORT can stay up. No
-httpx / TestClient dependency - API tests hit the live servers with urllib.
+$WEBSITE_TEST_PORT_MIN..$WEBSITE_TEST_PORT_MAX so the dev server on
+$WEBSITE_INTERNAL_PORT can stay up. No httpx / TestClient dependency - API tests
+hit the live servers with urllib.
 """
 
 import os
@@ -22,12 +22,12 @@ import pytest
 
 SRC_DIR = Path(__file__).parent.parent / "src"
 # The inclusive port range the server fixtures below draw from, one
-# consecutive port per fixture (allocated through _test_port). Factory-only
+# consecutive port per fixture (allocated through allocate_test_port). Factory-only
 # configuration variants need no server - and no port.
 PORT_MIN = int(os.environ.get("WEBSITE_TEST_PORT_MIN", "20177"))
-PORT_MAX = int(os.environ.get("WEBSITE_TEST_PORT_MAX", "20179"))
+PORT_MAX = int(os.environ.get("WEBSITE_TEST_PORT_MAX", "20182"))
 if PORT_MIN > PORT_MAX:
-    # Caught here rather than in _test_port, where an inverted range would
+    # Caught here rather than in allocate_test_port, where an inverted range would
     # surface as the "widen the range" error below - misleading advice when
     # the range is not too narrow but backwards.
     raise RuntimeError(
@@ -36,7 +36,7 @@ if PORT_MIN > PORT_MAX:
     )
 
 
-def _test_port(offset: int) -> int:
+def allocate_test_port(offset: int) -> int:
     """Return the offset-th port of the configured range, refusing to leave it."""
     port = PORT_MIN + offset
     if not PORT_MIN <= port <= PORT_MAX:
@@ -49,12 +49,19 @@ def _test_port(offset: int) -> int:
     return port
 
 
-@contextmanager
-def _run_server(
+def _kill_and_reap(proc: subprocess.Popen[bytes]) -> None:
+    """SIGKILL `proc` and wait for it, so no zombie outlives the failure."""
+    proc.kill()
+    # kill() only delivers the signal. Without the wait() the child stays a
+    # zombie for the rest of the session, and Popen.__del__ later reports it
+    # as "still running" - a ResourceWarning that buries the real error.
+    proc.wait()
+
+
+def start_server(
     port: int, env: dict[str, str], extra_args: tuple[str, ...] = ()
-) -> Iterator[str]:
-    """Start uvicorn on `port` with exactly `env`, yield its base URL when healthy."""
-    base_url = f"http://127.0.0.1:{port}"
+) -> subprocess.Popen[bytes]:
+    """Start uvicorn on `port` with exactly `env` and return it once healthy."""
     proc = subprocess.Popen(
         [
             sys.executable,
@@ -70,24 +77,36 @@ def _run_server(
         cwd=SRC_DIR,
         env=env,
     )
+    health_url = f"http://127.0.0.1:{port}/api/health"
+    deadline = time.monotonic() + 15
+    while True:
+        try:
+            with urllib.request.urlopen(health_url, timeout=1):
+                return proc
+        except urllib.error.HTTPError as err:
+            # The server is up but health failed - fail fast with the real
+            # status instead of spinning until the deadline. (HTTPError is
+            # an OSError subclass, so this except must come first.)
+            _kill_and_reap(proc)
+            raise RuntimeError(f"/api/health returned HTTP {err.code}") from err
+        except OSError as err:
+            if proc.poll() is not None:
+                # No reap needed: the poll() that detected the exit did it.
+                raise RuntimeError("uvicorn exited before becoming ready") from err
+            if time.monotonic() > deadline:
+                _kill_and_reap(proc)
+                raise RuntimeError("uvicorn did not become ready in 15s") from err
+            time.sleep(0.2)
+
+
+@contextmanager
+def _run_server(
+    port: int, env: dict[str, str], extra_args: tuple[str, ...] = ()
+) -> Iterator[str]:
+    """Start uvicorn on `port` with exactly `env`, yield its base URL when healthy."""
+    proc = start_server(port, env, extra_args)
     try:
-        deadline = time.monotonic() + 15
-        while True:
-            try:
-                with urllib.request.urlopen(f"{base_url}/api/health", timeout=1):
-                    break
-            except urllib.error.HTTPError as err:
-                # The server is up but health failed - fail fast with the real
-                # status instead of spinning until the deadline. (HTTPError is
-                # an OSError subclass, so this except must come first.)
-                raise RuntimeError(f"/api/health returned HTTP {err.code}") from err
-            except OSError as err:
-                if proc.poll() is not None:
-                    raise RuntimeError("uvicorn exited before becoming ready") from err
-                if time.monotonic() > deadline:
-                    raise RuntimeError("uvicorn did not become ready in 15s") from err
-                time.sleep(0.2)
-        yield base_url
+        yield f"http://127.0.0.1:{port}"
     finally:
         # SIGINT, not terminate(): uvicorn shuts down gracefully on both, but
         # after SIGTERM it re-raises the signal, killing the process without
@@ -98,8 +117,7 @@ def _run_server(
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             # uvicorn ignored the signal - don't let teardown hang the suite
-            proc.kill()
-            proc.wait()
+            _kill_and_reap(proc)
 
 
 @pytest.fixture(scope="session")
@@ -111,7 +129,9 @@ def server() -> Iterator[str]:
     # code's default, not whatever the shell carries (the dev container's
     # compose environment sets the variable).
     env = {k: v for k, v in os.environ.items() if k != "WEBSITE_TRUSTED_HOSTS"}
-    with _run_server(_test_port(0), {**env, "WEBSITE_ENABLE_DOCS": "1"}) as base_url:
+    with _run_server(
+        allocate_test_port(0), {**env, "WEBSITE_ENABLE_DOCS": "1"}
+    ) as base_url:
         yield base_url
 
 
@@ -132,7 +152,7 @@ def prefixed_server() -> Iterator[str]:
     tests/test_url_prefix.py.
     """
     with _run_server(
-        _test_port(1),
+        allocate_test_port(1),
         {**os.environ, "WEBSITE_ENABLE_DOCS": "1"},
         ("--root-path", "/prefix"),
     ) as base_url:
@@ -146,13 +166,13 @@ def trusted_hosts_server() -> Iterator[str]:
 
     site.example stands in for a deployment's public host name (the Host a
     reverse proxy forwards). 127.0.0.1 stays in the list, exactly as the
-    variable's documentation demands: the readiness poll in _run_server
+    variable's documentation demands: the readiness poll in start_server
     probes it, mirroring the distribution image's HEALTHCHECK - dropping it
     would hang this fixture the same way it would mark that container
     unhealthy.
     """
     with _run_server(
-        _test_port(2),
+        allocate_test_port(2),
         {**os.environ, "WEBSITE_TRUSTED_HOSTS": "127.0.0.1,site.example"},
     ) as base_url:
         yield base_url

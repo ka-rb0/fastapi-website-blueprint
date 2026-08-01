@@ -65,6 +65,15 @@ uvicorn app.main:app \
   anything downstream that trusts "this request was HTTPS") - if you reuse
   this pattern behind a different reverse proxy, set
   `WEBSITE_REVERSE_PROXY_TRUSTED_IP` to that proxy's real address instead.
+- The distribution image stops gracefully within
+  `WEBSITE_GRACEFUL_SHUTDOWN_SECONDS` (20 by default), which it passes to
+  uvicorn as `--timeout-graceful-shutdown`. Uvicorn without that flag waits
+  forever for in-flight connections, so a single stuck request turns every
+  rolling-deploy replacement into a SIGKILL once the orchestrator's grace
+  period runs out. Keep the value below that grace period
+  (`terminationGracePeriodSeconds` in Kubernetes, `docker stop --time`
+  elsewhere), and raise the grace period first if your requests need longer
+  - see [ARCHITECTURE.md](ARCHITECTURE.md).
 - To preview different screen sizes, press `Ctrl+Shift+M` in the browser's
   developer tools
 

@@ -119,3 +119,49 @@ docker run --rm --init \
 
 The container runs as an unprivileged user and includes a health check for
 `/api/health`.
+
+## Published images
+
+[publish.yml](../.github/workflows/publish.yml) builds this same
+`distribution` target on GitHub Actions and pushes it to
+`ghcr.io/<owner>/<repo>` (linux/amd64):
+
+| Trigger        | Tags published           |
+| -------------- | ------------------------ |
+| push to `main` | `main`, `sha-<short>`    |
+| push `v1.2.3`  | `1.2.3`, `1.2`, `latest` |
+| pull request   | none - build only        |
+
+The pull-request build publishes nothing; it exists so a broken Dockerfile or
+an unbuildable lockfile fails the PR instead of `main`. Prereleases
+(`v1.2.3-rc.1`) publish their exact version only - they do not move `1.2` or
+`latest`.
+
+Cutting a release is therefore just a tag, on a commit that is already on
+`main` - the workflow refuses to publish one that is not:
+
+```bash
+git tag v1.2.3 && git push origin v1.2.3
+```
+
+Pull and run a published image (`docker login ghcr.io` first while the package
+is private - see [GitHub Setup](../docs/GITHUB_SETUP.md)):
+
+```bash
+docker run --rm --init \
+  --publish 8000:8000 \
+  ghcr.io/<owner>/<repo>:latest
+```
+
+Every published digest is signed with the build workflow's own identity, so
+you can confirm an image was built here before you run it:
+
+```bash
+gh attestation verify oci://ghcr.io/<owner>/<repo>:latest -R <owner>/<repo>
+```
+
+See [GitHub Setup](../docs/GITHUB_SETUP.md) for what that proves.
+
+Deployments reachable under a real host name must additionally set
+`WEBSITE_TRUSTED_HOSTS`; the default trusts only local names, so any other
+`Host` header gets a 400.

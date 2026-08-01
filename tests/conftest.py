@@ -49,6 +49,15 @@ def allocate_test_port(offset: int) -> int:
     return port
 
 
+def _kill_and_reap(proc: subprocess.Popen[bytes]) -> None:
+    """SIGKILL `proc` and wait for it, so no zombie outlives the failure."""
+    proc.kill()
+    # kill() only delivers the signal. Without the wait() the child stays a
+    # zombie for the rest of the session, and Popen.__del__ later reports it
+    # as "still running" - a ResourceWarning that buries the real error.
+    proc.wait()
+
+
 def start_server(
     port: int, env: dict[str, str], extra_args: tuple[str, ...] = ()
 ) -> subprocess.Popen[bytes]:
@@ -78,13 +87,14 @@ def start_server(
             # The server is up but health failed - fail fast with the real
             # status instead of spinning until the deadline. (HTTPError is
             # an OSError subclass, so this except must come first.)
-            proc.kill()
+            _kill_and_reap(proc)
             raise RuntimeError(f"/api/health returned HTTP {err.code}") from err
         except OSError as err:
             if proc.poll() is not None:
+                # No reap needed: the poll() that detected the exit did it.
                 raise RuntimeError("uvicorn exited before becoming ready") from err
             if time.monotonic() > deadline:
-                proc.kill()
+                _kill_and_reap(proc)
                 raise RuntimeError("uvicorn did not become ready in 15s") from err
             time.sleep(0.2)
 
@@ -107,8 +117,7 @@ def _run_server(
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             # uvicorn ignored the signal - don't let teardown hang the suite
-            proc.kill()
-            proc.wait()
+            _kill_and_reap(proc)
 
 
 @pytest.fixture(scope="session")

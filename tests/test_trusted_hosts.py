@@ -12,7 +12,6 @@ the reason this guard exists and the only place its absence would show.
 """
 
 import urllib.error
-import urllib.parse
 import urllib.request
 
 import pytest
@@ -31,8 +30,8 @@ def _generated_origins(html: str) -> set[tuple[str, str]]:
     """
     Return the (scheme, host:port) origin of every absolute URL the page emits.
 
-    Parsed with urlsplit rather than matched as a substring of the page:
-    `"http://site.example/" in html` also passes on a URL that merely
+    Parsed (EmittedUrl.origin) rather than matched as a substring of the
+    page: `"http://site.example/" in html` also passes on a URL that merely
     *contains* the trusted host somewhere else in it - say
     http://attacker.example/?next=http://site.example/ - so it would not
     actually prove the pages were built for the trusted host. That is the
@@ -40,12 +39,7 @@ def _generated_origins(html: str) -> set[tuple[str, str]]:
     string http://site.example/ may be at an arbitrary position in the
     sanitized URL"); comparing parsed origins is the check it asks for.
     """
-    origins = set()
-    for emitted in emitted_urls(html):
-        parts = urllib.parse.urlsplit(emitted.url)
-        if parts.scheme or parts.netloc:  # root-relative URLs name no origin
-            origins.add((parts.scheme, parts.netloc))
-    return origins
+    return {emitted.origin for emitted in emitted_urls(html) if emitted.names_an_origin}
 
 
 @pytest.mark.parametrize("host", ["localhost", "127.0.0.1"])

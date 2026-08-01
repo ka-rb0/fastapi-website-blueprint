@@ -1,5 +1,6 @@
 """Shared helpers for tests that drive the factory-built stack or read pages."""
 
+import urllib.parse
 from html.parser import HTMLParser
 from typing import NamedTuple
 
@@ -34,6 +35,25 @@ class EmittedUrl(NamedTuple):
     def is_canonical(self) -> bool:
         """Whether this is the canonical link, the page's one absolute URL."""
         return self.tag == "link" and self.rel == "canonical"
+
+    @property
+    def origin(self) -> tuple[str, str]:
+        """The (scheme, host:port) this URL names, or ("", "") if it names none."""
+        parts = urllib.parse.urlsplit(self.url)
+        return parts.scheme, parts.netloc
+
+    @property
+    def names_an_origin(self) -> bool:
+        """
+        Whether this URL points at an origin rather than resolving against the page's.
+
+        Parsed, not tested for the substring "://": that misses a
+        scheme-relative "//example.com/css/style.css", which names a host
+        just as much and leaves the deployment just as far behind. A
+        root-relative URL carries neither a scheme nor a netloc, so any of
+        either is an origin the app had to reconstruct for itself.
+        """
+        return any(self.origin)
 
 
 class _UrlCollector(HTMLParser):

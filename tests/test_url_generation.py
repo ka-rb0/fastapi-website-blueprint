@@ -54,7 +54,7 @@ def test_rendering_urls_name_no_origin_so_a_proxy_cannot_break_them(
     absolute = [
         emitted.url
         for emitted in _page(server)
-        if not emitted.is_canonical and "://" in emitted.url
+        if not emitted.is_canonical and emitted.names_an_origin
     ]
     assert not absolute, (
         "these URLs name an origin the app had to reconstruct from the"

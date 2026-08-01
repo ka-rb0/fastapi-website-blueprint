@@ -108,12 +108,13 @@ COPY src/app /src/app
 # working directory on sys.path.
 ENV PYTHONPATH=/src
 
-# uvicorn's access logger writes to stdout, which is a pipe under Docker, so
-# Python block-buffers it in 8 KB chunks: `docker logs` shows nothing until a
-# chunk fills, and everything still buffered is lost when the process is
-# SIGKILLed (OOM kill, failed liveness probe) - exactly when the last lines
-# matter most. ENV rather than the CMD's `python -u`, so anything else run in
-# the container (docker exec, the HEALTHCHECK probe) logs promptly as well.
+# The app writes its whole log stream to stdout (see "Request correlation" in
+# docs/ARCHITECTURE.md), which is a pipe under Docker, so Python block-buffers
+# it in 8 KB chunks: `docker logs` shows nothing until a chunk fills, and
+# everything still buffered is lost when the process is SIGKILLed (OOM kill,
+# failed liveness probe) - exactly when the last lines matter most. ENV rather
+# than the CMD's `python -u`, so anything else run in the container
+# (docker exec, the HEALTHCHECK probe) logs promptly as well.
 ENV PYTHONUNBUFFERED=1
 
 # Overridable at run time: docker run -e WEBSITE_INTERNAL_PORT=... -p ...

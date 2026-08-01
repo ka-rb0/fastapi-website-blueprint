@@ -30,6 +30,9 @@ dark themes.
 - A development-only Caddy sidecar for exercising local HTTPS, forwarded
   headers, and a stripped URL prefix against a second reload-enabled Uvicorn
   process while preserving direct HTTP access.
+- Request correlation: every request gets an `X-Request-ID` (accepted from
+  the caller when usable, minted otherwise), echoed on the response and
+  printed on every log line - uvicorn's access log included.
 - Strict linting and type checking wired into CI.
 - Security by default: same-origin CSP and hardening headers on every
   response, a Host-header allowlist, a transport-level request-body cap,

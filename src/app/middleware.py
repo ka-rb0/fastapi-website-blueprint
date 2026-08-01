@@ -12,6 +12,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from .observability import REQUEST_ID_HEADER, bind_request_id
+
 SECURITY_HEADERS = {
     "Content-Security-Policy": (
         "default-src 'none'; "
@@ -51,6 +53,42 @@ DOCS_CSP = (
     )
     .replace("img-src 'self'", "img-src 'self' data: https://fastapi.tiangolo.com")
 )
+
+
+class RequestIDMiddleware:
+    """
+    Give every request a correlation ID, in the logs and on the response.
+
+    Outermost by design: the ID has to exist before anything below can log or
+    answer, so a body-cap 413, a rejected ``Host``, an unhandled exception's
+    500 - responses produced without an endpoint ever running - are all
+    findable in the log by the same ID the client was handed back.
+
+    Echoing the header is what makes the ID reachable without log access: a
+    user reporting a failure can read it off the response, and a caller can
+    attach it to a bug report or pass it to the next service.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        """Wrap ``app`` so its requests are correlated."""
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        with bind_request_id(Headers(scope=scope).get(REQUEST_ID_HEADER)) as request_id:
+
+            async def send_with_request_id(message: Message) -> None:
+                if message["type"] == "http.response.start":
+                    MutableHeaders(scope=message)[REQUEST_ID_HEADER] = request_id
+                await send(message)
+
+            # Inside the binding, which is what puts the ID on uvicorn's
+            # access line: uvicorn logs it from the send() call above, i.e.
+            # still within this request's context.
+            await self.app(scope, receive, send_with_request_id)
 
 
 class SecurityHeadersMiddleware:

@@ -57,6 +57,13 @@ uvicorn app.main:app \
   that never read them. Per-field limits like the shout form's `maxlength`
   only apply after a whole body has been received, so raise either limit
   deliberately when an endpoint needs more.
+- Every response carries an `X-Request-ID`, and every log line prints it in
+  brackets - uvicorn's access line included, so one ID finds the request and
+  everything the app logged while handling it. Send the header yourself (or
+  have your gateway send it) and the app keeps your value, as long as it is
+  1-64 visible ASCII characters; anything else is replaced with a fresh one
+  rather than refused. Lines with no request behind them (startup, shutdown)
+  show `[-]`. `LOG_LEVEL` sets the level for the app and uvicorn alike.
 - `--forwarded-allow-ips="$WEBSITE_REVERSE_PROXY_TRUSTED_IP"` defaults to
   Caddy's pinned Compose-network address (see `docker-compose.yml`), not
   `*`: uvicorn only honors X-Forwarded-For/X-Forwarded-Proto from that one

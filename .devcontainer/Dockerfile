@@ -127,6 +127,18 @@ ENV WEBSITE_INTERNAL_PORT=8000
 # override changes the bind port, not this line.
 EXPOSE ${WEBSITE_INTERNAL_PORT}
 
+# How long uvicorn may spend draining in-flight requests after SIGTERM.
+# uvicorn's own default is *no* limit: it waits for every open connection to
+# finish, so one slow or stuck request keeps the container alive until the
+# orchestrator's termination grace period runs out and SIGKILL cuts the
+# connections mid-response - the opposite of draining them, and a rolling
+# deploy that stalls one grace period per replica. Bounding the wait here
+# turns that into a clean exit. Keep this value *below* the orchestrator's
+# grace period (Kubernetes `terminationGracePeriodSeconds`, 30s by default;
+# `docker stop --time`, 10s by default) so uvicorn is the one that decides
+# when to give up; raise both together for long-running requests.
+ENV WEBSITE_GRACEFUL_SHUTDOWN_SECONDS=20
+
 # Nothing needs root at run time: uvicorn binds a high port and the code is
 # read-only, so drop to an unprivileged user.
 RUN useradd --system --no-create-home app
@@ -136,5 +148,6 @@ USER app
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
   CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ['WEBSITE_INTERNAL_PORT'] + '/api/health', timeout=4)"
 
-# Shell form allows WEBSITE_INTERNAL_PORT to resolve at run time.
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port \"${WEBSITE_INTERNAL_PORT}\""]
+# Shell form allows WEBSITE_INTERNAL_PORT and the shutdown timeout to resolve
+# at run time; exec makes uvicorn PID 1, so it receives the stop signal itself.
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port \"${WEBSITE_INTERNAL_PORT}\" --timeout-graceful-shutdown \"${WEBSITE_GRACEFUL_SHUTDOWN_SECONDS}\""]

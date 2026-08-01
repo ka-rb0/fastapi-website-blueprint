@@ -288,6 +288,32 @@ determines the root log level. That is an accepted limitation: per-app
 isolation covers routing, templates and middleware, not process-wide
 services.
 
+### Bounded graceful shutdown (`.devcontainer/Dockerfile`)
+
+Shutdown is only half the app's business: the lifespan handler runs after
+uvicorn has stopped accepting connections and drained the ones still open,
+and how long uvicorn is willing to wait for that is a server flag, not an
+app setting. Its default is _no_ limit - one request that never finishes
+(a slow client, a stuck upstream, an idle streaming response) keeps the
+process alive indefinitely after SIGTERM. Under an orchestrator that
+inverts the intent of a rolling deploy: the replica hangs until the
+termination grace period expires, then SIGKILL severs every connection,
+including the ones that were draining cleanly. So the distribution image
+passes `--timeout-graceful-shutdown "${WEBSITE_GRACEFUL_SHUTDOWN_SECONDS}"`
+(default 20s).
+
+The value is load-bearing only in relation to the orchestrator's own
+grace period - Kubernetes `terminationGracePeriodSeconds` (30s by
+default), `docker stop --time` (10s by default). Keep it _below_ that
+period, so the process decides when to give up and exits with its logs
+flushed instead of being killed; raising it above the grace period
+restores the original failure. Deployments whose requests legitimately
+outlive 20s must raise both, in that order.
+
+`tests/test_graceful_shutdown.py` pins the relationship in both
+directions: that the image's command carries a finite timeout, and that
+uvicorn actually abandons an in-flight request once it expires.
+
 ## Testing strategy (`tests/`)
 
 API and security tests run against live uvicorn servers with plain

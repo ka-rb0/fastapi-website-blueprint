@@ -3,6 +3,17 @@
 {% block meta %}
   <meta name="description"
         content="A minimal, modern FastAPI website blueprint with light and dark themes." />
+  {#- The one URL on the page that is deliberately absolute (bare url_for, no
+      .path): a canonical link names the single address a search engine should
+      index, and "/" names a different page on every host that serves it. It
+      carries the scheme and host from the request, so it is only correct when
+      the deployment tells uvicorn which proxy to trust
+      (--forwarded-allow-ips, see docs/QUICKSTART.md) - and only ever names a
+      host on the WEBSITE_TRUSTED_HOSTS allowlist, which is what stops a
+      spoofed Host from pointing search engines elsewhere. Not on the 404
+      page: a canonical link there would tell crawlers a missing address is
+      the homepage. See "URL generation" in docs/ARCHITECTURE.md. #}
+  <link rel="canonical" href="{{ url_for('index') }}" />
 {% endblock meta %}
 {% block title %}FastAPI Website Blueprint{% endblock title %}
 {% block heading %}FastAPI Website Blueprint{% endblock heading %}
@@ -13,7 +24,11 @@
           below. The endpoint travels as the form's action/method metadata -
           the script reads them instead of hardcoding a URL, so the generated
           action (url_for honors root_path) keeps the feature working under a
-          URL prefix. minlength/maxlength are MIN/MAX_SHOUT_LENGTH from
+          URL prefix. The action is root-relative like every other URL here
+          (see base.html); js/shout.js reads it back through the DOM's
+          .action property, which the browser resolves against the page's own
+          origin - so dropping the scheme and host costs the fetch nothing.
+          minlength/maxlength are MIN/MAX_SHOUT_LENGTH from
           src/app/schemas.py, injected at render time - the server still
           validates; these only give instant feedback in the browser.
           `required` stays alongside minlength: an empty value skips
@@ -26,7 +41,7 @@
   <form class="shout"
         id="shout-form"
         method="post"
-        action="{{ url_for('shout') }}"
+        action="{{ url_for('shout').path }}"
         hidden>
     <label for="shout-input">Text to shout</label>
     <input id="shout-input"
@@ -41,5 +56,5 @@
   </form>
 {% endblock main %}
 {% block scripts %}
-  <script type="module" src="{{ url_for('static', path='js/shout.js') }}"></script>
+  <script type="module" src="{{ url_for('static', path='js/shout.js').path }}"></script>
 {% endblock scripts %}

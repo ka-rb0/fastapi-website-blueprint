@@ -3,11 +3,16 @@ Guards for deployment under a URL prefix.
 
 Against `prefixed_server` (uvicorn --root-path /prefix, see conftest.py):
 the browser resolves a page's links against the site's *public* URL, so a
-root-hardcoded /css/theme.css would escape the prefix and miss the app
+hand-written /css/theme.css would escape the prefix and miss the app
 entirely. The templates generate every URL with url_for (which carries
 root_path) and js/shout.js reads the API endpoint from the form's rendered
 action attribute - these tests fetch the live pages and assert the prefix
 landed everywhere a URL is emitted.
+
+Rendering URLs are root-relative (`url_for(...).path`, see base.html), so
+the assertions below match `/prefix/...` rather than a full origin. Which
+URLs carry an origin at all is decided in tests/test_url_generation.py;
+these tests only care that the prefix reached every one of them.
 """
 
 import re
@@ -46,7 +51,9 @@ def test_index_asset_urls_carry_prefix(prefixed_server: str) -> None:
     """Every asset URL on the homepage points inside the prefix."""
     html = _get_html(f"{prefixed_server}/")
     for asset in ASSETS:
-        assert f"{prefixed_server}/prefix/{asset}" in html, (
+        # Quoted, so this matches a whole attribute value: an unquoted
+        # substring check would also pass on http://elsewhere/prefix/....
+        assert f'"/prefix/{asset}"' in html, (
             f"{asset} is not referenced under the /prefix root path"
         )
 
@@ -58,13 +65,13 @@ def test_shout_form_action_carries_prefix(prefixed_server: str) -> None:
     assert match, '<form id="shout-form" ...> not found in the rendered homepage'
     action = re.search(r'\baction="([^"]*)"', match.group(0))
     assert action, "the shout form carries no action attribute"
-    assert action.group(1) == f"{prefixed_server}/prefix/api/shout"
+    assert action.group(1) == "/prefix/api/shout"
 
 
 def test_not_found_home_link_carries_prefix(prefixed_server: str) -> None:
     """The 404 page's way home leads to the prefixed site root."""
     html = _get_html(f"{prefixed_server}/no/such/page", expected_status=404)
-    assert f'href="{prefixed_server}/prefix/"' in html
+    assert 'href="/prefix/"' in html
 
 
 def test_unknown_api_path_stays_json_under_a_prefix(prefixed_server: str) -> None:

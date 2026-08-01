@@ -5,11 +5,26 @@
     copies in sync by hand.
 
     Every URL is generated with url_for, never written literally: the 404
-    page is served at any missing path (e.g. /some/deep/url), where relative
-    URLs would resolve against the missing path's directory instead of the
-    site root, and url_for also carries the app's root_path, so the links
-    keep working when the app is deployed under a URL prefix (guarded by
-    tests/test_url_prefix.py). -#}
+    page is served at any missing path (e.g. /some/deep/url), where a
+    *document-relative* URL (css/style.css) would resolve against the missing
+    path's directory instead of the site root, and url_for also carries the
+    app's root_path, so the links keep working when the app is deployed under
+    a URL prefix (guarded by tests/test_url_prefix.py).
+
+    Everything the browser fetches to render the page takes `.path`, which
+    keeps the root-path-prefixed URL (/prefix/css/style.css) and drops the
+    scheme and host. Those come from the request, and behind a
+    TLS-terminating proxy they are only right when uvicorn was told which
+    proxy to trust (--forwarded-allow-ips, default 127.0.0.1 - never the
+    proxy in a container). When they are wrong, every asset URL is http:// on
+    an https:// page, which our own CSP (style-src 'self') blocks as
+    cross-origin: the site renders unstyled, with a dead theme switch and a
+    dead shout form. A root-relative URL is resolved by the browser against
+    the origin it actually used, so there is nothing to get wrong.
+
+    The one deliberate exception is the canonical link in index.html, which
+    is absolute because a crawler needs a full address. See "URL generation"
+    in docs/ARCHITECTURE.md; tests/test_url_generation.py guards both. -#}
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -23,7 +38,7 @@
     </title>
     <link rel="icon"
           type="image/svg+xml"
-          href="{{ url_for('static', path='favicon.svg') }}" />
+          href="{{ url_for('static', path='favicon.svg').path }}" />
     {#- Tints browser chrome to match --bg; media-scoped, so it follows the
         OS scheme. An in-page theme override doesn't retint the chrome - a
         deliberate simplicity tradeoff. #}
@@ -33,12 +48,14 @@
     <meta name="theme-color"
           media="(prefers-color-scheme: dark)"
           content="{{ theme_color.dark }}" />
-    <link rel="stylesheet" href="{{ url_for('static', path='css/theme.css') }}" />
-    <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}" />
+    <link rel="stylesheet"
+          href="{{ url_for('static', path='css/theme.css').path }}" />
+    <link rel="stylesheet"
+          href="{{ url_for('static', path='css/style.css').path }}" />
     {#- Deliberately blocking (no defer/module): re-applies a saved theme
         before first paint so there is no flash. A file, not an inline
         script, because the CSP (see src/app/middleware.py) bans inline scripts. #}
-    <script src="{{ url_for('static', path='js/theme-init.js') }}"></script>
+    <script src="{{ url_for('static', path='js/theme-init.js').path }}"></script>
   </head>
   <body>
     <header>
@@ -82,7 +99,7 @@
         graphs, so a failure (or deletion) of one never takes down another.
         Page-specific modules go in the scripts block, next to their markup. #}
     <script type="module"
-            src="{{ url_for('static', path='js/theme-switch.js') }}"></script>
+            src="{{ url_for('static', path='js/theme-switch.js').path }}"></script>
     {% block scripts %}
     {% endblock scripts %}
   </body>

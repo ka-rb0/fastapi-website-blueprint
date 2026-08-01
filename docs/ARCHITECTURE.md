@@ -130,14 +130,69 @@ and mypy strict rejects the un-`__all__`-ed re-export anyway. If the
 import ever breaks on an upgrade, the app's own routing breaks loudly on
 the same upgrade - the risk is self-announcing.
 
+## URL generation (`src/app/templates/`)
+
+The templates emit two kinds of URL. Every URL is built with `url_for`,
+never written literally, so route names and `root_path` stay the single
+source of truth; what differs is whether the URL keeps the origin
+`url_for` puts in front of it.
+
+**Rendering URLs are root-relative** - assets, form actions, in-site
+links, written `{{ url_for(...).path }}`. The browser resolves them
+against the origin it actually used, so the app never has to know its
+own public address:
+
+```jinja
+<link rel="stylesheet" href="{{ url_for('static', path='css/style.css').path }}" />
+```
+
+Keeping the origin here makes the page depend on the app reconstructing
+it from the request, which behind a TLS-terminating proxy means
+uvicorn's `X-Forwarded-Proto` handling - and uvicorn honors that header
+only from peers listed in `--forwarded-allow-ips`, which defaults to
+`127.0.0.1` and is therefore never the proxy in a container. A wrong
+reconstruction emits every asset URL as `http://` on an `https://` page,
+where the app's **own** CSP (`style-src 'self'`) blocks it as
+cross-origin: the site renders unstyled, with a dead theme switch and a
+dead shout form, because both ship `hidden` and are revealed by
+JavaScript that never loads. Root-relative URLs remove the guess, so
+that failure cannot occur however the deployment is wired.
+
+**The canonical link is absolute** - one per indexable page, written
+with a bare `url_for`:
+
+```jinja
+<link rel="canonical" href="{{ url_for('index') }}" />
+```
+
+A crawler needs the single address to index, and `/` is a different page
+on every host that serves it, so this URL has to carry the scheme and
+host. That makes it the one place the proxy-header configuration is
+load-bearing: a deployment that does not set `--forwarded-allow-ips`
+advertises an `http://` canonical for an HTTPS site. The failure is a
+wrong hint to search engines rather than a broken page, which is why
+this is the right - and only - URL to spend it on. The 404 page carries
+no canonical link: it would tell crawlers a missing address is the
+homepage.
+
+Any further URL that leaves the page - an `og:url`, a sitemap, a link in
+an e-mail - belongs in the absolute category for the same reason.
+
+`tests/test_url_generation.py` pins both kinds and the prefix handling
+of each; `tests/test_url_prefix.py` covers `root_path` across the whole
+page. One sharp edge worth knowing: `URL.path` drops query strings and
+fragments. `url_for` produces neither, but a helper that chains
+`.include_query_params(...)` before `.path` would silently lose them.
+
 ## Trusted hosts (`src/app/factory.py`, `Settings.trusted_hosts`)
 
-Every URL the templates emit comes from `url_for`, which builds absolute
-URLs from the request's `Host` header - without an allowlist, an
-arbitrary `Host` would be reflected into rendered asset and form URLs.
-Harmless while nothing consumes those URLs downstream, dangerous the
-moment a cache, account e-mail, or absolute redirect is built on top of
-this blueprint - so the guard ships now, not then. Operational notes
+`url_for` builds URLs from the request's `Host` header, and the
+homepage's canonical link (see above) puts one of them in front of
+search engines - so an unlisted `Host` would advertise an
+attacker-chosen address as this site's indexable one.
+`TrustedHostMiddleware` rejects those requests before any template
+renders, and `tests/test_trusted_hosts.py` asserts that the trusted host
+is the only origin a rendered page names. Operational notes
 (the allowlist matches site names, wildcards, keeping `127.0.0.1` for
 the container healthcheck) live in [QUICKSTART.md](QUICKSTART.md).
 Rejected requests get a plain 400 that still carries the security

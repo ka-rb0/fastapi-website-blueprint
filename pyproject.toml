@@ -17,7 +17,7 @@ license-files = ["LICENSE"]
 # are floors. Install without the dev tooling: `uv sync --no-default-groups`.
 dependencies = [
   "pydantic>=2.13.4",
-  "fastapi>=0.140.0",
+  "fastapi>=0.140.13",
   "jinja2>=3.1.6",
   "uvicorn[standard]>=0.51.0",
 ]
@@ -30,7 +30,7 @@ dependencies = [
 # images already ship the dev tools.
 lint = [
   "codespell>=2.4.2",
-  "djlint>=1.42.3",
+  "djlint>=1.43.1",
   "ruff>=0.16.0",
   # pip-audit checks the locked python packages against known-CVE databases
   "pip-audit>=2.9.0",

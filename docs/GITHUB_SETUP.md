@@ -85,7 +85,7 @@ advisory databases and are free everywhere - keep them.
 schedule, so advisories published between pushes still surface; it is also
 free everywhere.
 
-## 6. Container images - nothing to click, two things to know
+## 6. Container images - nothing to click, three things to know
 
 [publish.yml](../.github/workflows/publish.yml) pushes the `distribution`
 image to `ghcr.io/<owner>/<repo>` using the workflow's own `GITHUB_TOKEN`,
@@ -103,16 +103,47 @@ because GitHub creates the package then:
   or add a scheduled job using
   [actions/delete-package-versions](https://github.com/actions/delete-package-versions).
 
+The third thing needs no setting, only a warning, because GitHub's own UI
+gets it wrong:
+
+- **Do not pull the `sha256-…` tag.** The package page lists it under
+  "Recent tagged image versions" and - worse - its **Install from the command
+  line** box offers it as a ready-made `docker pull` command. That tag is not
+  an image. It is where the OCI referrers spec parks this version's signed
+  attestations (section 7), and pulling it fails with
+  `unsupported media type application/vnd.oci.empty.v1+json`. GitHub shows it
+  because the snippet names the most recently published version, and the
+  attestations are always pushed after the image they describe. Pull `latest`,
+  a version tag, `main`, or the digest with `@sha256:` - note the `@` and the
+  colon, which is what distinguishes a real digest reference from this tag.
+
 Storage and (for private packages) bandwidth count against the account's
 Packages quota - free and generous for public packages.
 
 ## 7. Verifying that an image really came from this repo
 
-Every published digest carries a Sigstore-signed
-[SLSA build provenance attestation](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds)
-created by `publish.yml`. Nothing to enable - artifact attestations are free
-on public repositories for every GitHub plan (private and internal repos need
-Enterprise Cloud; drop the attest step on a private fork).
+A digest proves an image arrived intact. It proves nothing about where it came
+from - anyone can build anything and push it under a similar name. Attestations
+close that gap: they are signed statements _about_ a digest.
+
+Every digest `publish.yml` publishes carries two, both signed:
+
+- a [SLSA build provenance attestation](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds) -
+  which repository, workflow, commit and run produced it
+- an **SPDX SBOM** - the inventory of what is inside it: the Debian packages
+  from the base image and the Python distributions from `uv.lock`. This is what
+  answers "are we affected?" the day a widely-exploited CVE is announced,
+  without rebuilding or guessing.
+
+The signing uses no key you have to store or rotate. The workflow trades its
+GitHub OIDC identity for a Sigstore certificate valid for about ten minutes,
+signs with that, records the signature in the public **Rekor** transparency
+log, and the certificate then expires. That is why `id-token: write` appears in
+the workflow's permissions.
+
+Nothing to enable - artifact attestations are free on public repositories for
+every GitHub plan (private and internal repos need Enterprise Cloud; drop the
+attest steps on a private fork).
 
 Anyone can check an image before running it:
 
@@ -122,10 +153,50 @@ gh attestation verify oci://ghcr.io/<owner>/<repo>:latest -R <owner>/<repo>
 
 It passes only for images this repository's workflow built and signed, and
 reports the commit, workflow and run that produced them. An image someone
-else pushed under a look-alike name fails.
+else pushed under a look-alike name fails. Add `--predicate-type` to check a
+specific one of the two; the SBOM itself is the `predicate` of its statement,
+so this prints the package inventory:
 
-Because the workflow also pushes the attestation to GHCR beside the image,
+```bash
+gh attestation verify oci://ghcr.io/<owner>/<repo>:latest -R <owner>/<repo> \
+  --predicate-type https://spdx.dev/Document --format json \
+  | jq '.[0].verificationResult.statement.predicate'
+```
+
+`publish.yml` does not just produce these and hope. Its `verify` job pulls the
+published digest back out of the registry, runs both verifications, boots the
+container and probes `/api/health` - so a push that publishes an unbootable or
+unverifiable image goes red here instead of in a deployment.
+
+Because the workflow also pushes both attestations to GHCR beside the image,
 registry-side verifiers (cosign, Kyverno and other admission controllers) can
-check the same signature without calling the GitHub API. Each published
+check the same signatures without calling the GitHub API. Each published
 version therefore gets one extra untagged referrer entry in the package list -
-that is the attestation, not junk; leave it alone when pruning.
+both attestations share it - that is the signatures, not junk; leave it alone
+when pruning, and do not try to `docker pull` it (section 6).
+
+## 8. Repository security posture - OpenSSF Scorecard
+
+The workflows above audit dependencies, code and artifacts. None of them
+notice if the repository's _own practices_ slip - a disabled ruleset, a new
+workflow with a floating action tag, an over-permissioned token.
+
+[scorecard.yml](../.github/workflows/scorecard.yml) fills that gap. The
+[OpenSSF Scorecard](https://github.com/ossf/scorecard) grades this repo weekly
+against ~18 supply-chain checks and files the results as code scanning alerts
+next to CodeQL's. Nothing to click; it runs from the checked-in workflow.
+
+Two things worth knowing:
+
+- **Results are public.** `publish_results: true` sends the score to the
+  OpenSSF API, which backs the score badge and the data
+  [deps.dev](https://deps.dev) shows. Correct for a public template; think
+  before enabling it elsewhere.
+- **`Branch-Protection` scores low on purpose.** That check cannot read
+  ruleset details with the default `GITHUB_TOKEN`. Fixing it means storing a
+  classic PAT with `repo` scope as a secret, and a long-lived broadly-scoped
+  token is a worse trade than one imprecise check. The workflow comment shows
+  how to opt in if you disagree.
+
+💰 Public repos only, on two counts: publishing results requires a public repo,
+and the SARIF upload needs code scanning. Delete the workflow on a private fork.

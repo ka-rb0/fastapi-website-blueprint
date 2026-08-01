@@ -9,9 +9,26 @@
 #                      Dockerfile and the locked dependencies still produce a
 #                      working image, then discarded
 #
-# Everything published is signed: each pushed digest gets a Sigstore-signed SLSA
-# build provenance attestation tying it to this repository and this workflow (see
-# the attest step, and docs/GITHUB_SETUP.md for how consumers verify it).
+# `:sha-<short>` is deliberately scoped to main (see the metadata step): a
+# release tag is cut on a commit that main already carries, so without that
+# scoping the tag run would rebuild the same commit and repoint `:sha-<short>`
+# at a second, different digest - the timestamp label alone changes it. The
+# version tags a release publishes are never rewritten; the tag ruleset in
+# .github/rulesets/protect-tags.json keeps the git tag behind them fixed too.
+#
+# Every published digest carries two Sigstore-signed attestations:
+#   - SLSA build provenance - which repo, workflow, commit and run built it
+#   - an SPDX SBOM          - what is inside it
+# Both are stored in GitHub and pushed beside the image in the registry, and
+# both are verified against the real registry by the `verify` job below before
+# the run is allowed to go green. docs/GITHUB_SETUP.md covers how consumers
+# check them.
+#
+# Images are multi-platform (linux/amd64 + linux/arm64), arm64 is built under
+# QEMU emulation, which is why the job's timeout is generous; if that ever
+# gets too slow, the faster route is a build matrix across `ubuntu-latest` and
+# the native `ubuntu-24.04-arm` runner, merging the two digests with
+# `docker buildx imagetools create`.
 #
 # The image is built from the repository root, like every other build of this
 # Dockerfile: .dockerignore is an allowlist that admits exactly what the stages
@@ -48,16 +65,23 @@ permissions: {}
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Emulated arm64 makes this several times slower than the amd64-only build
+    # it replaced - the ceiling is deliberately loose rather than tuned.
+    timeout-minutes: 45
     permissions:
       contents: read # checkout
-      # push to ghcr.io, and store the attestation beside the image there.
+      # push to ghcr.io, and store the attestations beside the image there.
       # Unused on pull_request/merge_group runs - GitHub issues a read-only
       # token for fork PRs regardless, and nothing is pushed there.
       packages: write
-      id-token: write # mint the OIDC token Sigstore signs the attestation with
-      attestations: write # persist the attestation to this repository
+      id-token: write # mint the OIDC token Sigstore signs the attestations with
+      attestations: write # persist the attestations to this repository
       artifact-metadata: write # list the image on the repo's artifacts page
+    # Consumed by the verify job, which re-fetches the image from the registry
+    # rather than trusting anything left behind in this job.
+    outputs:
+      image: ${{ steps.image.outputs.name }}
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -83,9 +107,15 @@ jobs:
             echo "::error::${GITHUB_REF_NAME} points at a commit that is not on main - merge it first, then re-tag."
             exit 1
           fi
+      # Registers QEMU binfmt handlers so the amd64 runner can execute arm64
+      # binaries - `uv sync` and `useradd` in the Dockerfile have to actually
+      # run for the arm64 variant. Needed only because this builds more than
+      # the runner's native platform.
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
       # build-push-action drives Buildx; this step provisions it with the
-      # container driver, which the Dockerfile's `# syntax=` frontend and its
-      # `--mount=type=bind` lockfile mounts need a current BuildKit for.
+      # container driver, which the Dockerfile's `# syntax=` frontend, its
+      # `--mount=type=bind` lockfile mounts and multi-platform output need a
+      # current BuildKit for.
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
       # Only publishing runs authenticate. GITHUB_TOKEN's packages:write scope
       # is enough to push to the repo's own namespace - no PAT, no secret to
@@ -99,7 +129,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       # ghcr.io rejects upper-case names, and a repository owner or name may
       # contain them. metadata-action lower-cases `images` on its own; the
-      # attestation's subject-name is taken literally, so both read this.
+      # attestations' subject-name is taken literally, so both read this.
       - name: Derive the image name
         id: image
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
@@ -118,7 +148,9 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=ref,event=branch
             type=ref,event=pr
-            type=sha
+            # Default-branch pushes only: see the header comment for why a
+            # release tag must not repoint this at a second digest.
+            type=sha,enable={{is_default_branch}}
       - name: Build and push
         id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -129,31 +161,35 @@ jobs:
           # it BuildKit would build the last stage - the same one today, but an
           # added stage must not silently change what gets published.
           target: distribution
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
           # BuildKit's own provenance attestation stays off. It is unsigned -
-          # anyone who can push to a registry can write one - and it turns the
-          # single-platform image into an index that GHCR lists as an extra
-          # untagged `unknown/unknown` artifact. The signed attestation created
-          # in the next step is this image's authoritative provenance.
+          # anyone who can push to a registry can write one - and it adds
+          # `unknown/unknown` entries that GHCR lists as extra untagged
+          # artifacts. The signed attestations created below are this image's
+          # authoritative provenance and SBOM. (BuildKit's `sbom: true` is
+          # declined for the same reason: unsigned, and Syft below produces a
+          # richer SPDX document.)
           provenance: false
+      # Everything from here on describes an image that was actually pushed.
+      # `steps.build.outputs.digest` is the digest of the multi-platform index,
+      # which is what every tag above resolves to - so attesting it covers the
+      # image consumers actually pull, whatever their architecture.
+      #
       # Proof the image was built from this repository, by this workflow:
       # signs the pushed digest with a short-lived Sigstore certificate issued
       # against the job's OIDC identity, and records a SLSA build provenance
       # attestation. Free on public repos (private ones need Enterprise Cloud).
-      # Consumers verify with the GitHub CLI, which fails on any image that did
-      # not come from here:
-      #
-      #   gh attestation verify oci://ghcr.io/<owner>/<repo>:<tag> -R <owner>/<repo>
       #
       # push-to-registry additionally stores the attestation beside the image in
       # GHCR, so registry-only verifiers (cosign, Kyverno admission policies)
-      # can check it without reaching the GitHub API. That costs one referrer
-      # artifact per published version - the reason it is worth the untagged
-      # entry that `provenance: false` above declines.
+      # can check it without reaching the GitHub API. Both attestations land
+      # under the same `sha256-<digest>` referrer tag, so this costs one extra
+      # artifact per published version, not two - the reason it is worth the
+      # untagged entry that `provenance: false` above declines.
       - name: Attest build provenance
         if: github.event_name == 'push'
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
@@ -161,3 +197,113 @@ jobs:
           subject-name: ${{ steps.image.outputs.name }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
+      # Syft inspects the pushed image and inventories what is in it: the
+      # Debian packages from the base layer and the Python distributions uv
+      # installed. That inventory is what answers "are we affected?" when the
+      # next widely-exploited CVE lands, without rebuilding or guessing.
+      #
+      # Scanning by digest, not by tag, ties the SBOM to the exact bytes the
+      # attestation below covers - a tag could move between the two steps.
+      # Syft reads one platform out of a multi-platform index; linux/amd64 is
+      # named explicitly rather than left to default to the runner's. The two
+      # variants share their Python and Debian package sets, differing in
+      # compiled artifacts, so the amd64 inventory describes both closely but
+      # not byte-for-byte.
+      #
+      # upload-artifact is off: the SBOM's durable home is the signed
+      # attestation, retrievable with `gh attestation verify --format json`,
+      # which outlives the 90-day cap on workflow artifacts.
+      - name: Generate the SBOM
+        if: github.event_name == 'push'
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+      # Signs the SBOM the same keyless way as the provenance above, against
+      # the same digest. An unsigned SBOM is a text file anyone can rewrite;
+      # signed, it is a statement this workflow is accountable for.
+      #
+      # actions/attest with sbom-path, not actions/attest-sbom: the latter is
+      # deprecated and now only forwards to an older pinned actions/attest.
+      # Passing sbom-path makes this an SPDX attestation
+      # (predicate type https://spdx.dev/Document, the one the verify job
+      # below checks for) rather than the provenance the step above produces.
+      - name: Attest the SBOM
+        if: github.event_name == 'push'
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: sbom.spdx.json
+          push-to-registry: true
+
+  # Closes the loop: everything above proves the build succeeded, nothing above
+  # proves the artifact is usable. This job throws away the build context and
+  # approaches the registry the way a consumer would - pull the digest, verify
+  # both signatures, boot the container, hit the health endpoint. A push that
+  # publishes an unbootable or unverifiable image fails here rather than in
+  # somebody's deployment.
+  verify:
+    needs: publish
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read # checkout is not needed, but gh resolves the repo with it
+      packages: read # pull the image back out of ghcr.io
+      # `permissions:` zeroes out every scope it does not list, so the read
+      # side of what the publish job wrote has to be named explicitly.
+      attestations: read # look the attestations up through the GitHub API
+    steps:
+      # The package is private until its visibility is changed by hand after
+      # the first publish (docs/GITHUB_SETUP.md covers it), so authenticate
+      # rather than assume anonymous pulls work. gh reads the same credential
+      # store for the oci:// lookup below.
+      - name: Log in to ghcr.io
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Fails on any image this repository's workflow did not build and sign,
+      # including one pushed under a look-alike name. --predicate-type selects
+      # which of the two attestations is being checked; both must pass.
+      - name: Verify the signed attestations
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_REF: oci://${{ needs.publish.outputs.image }}@${{ needs.publish.outputs.digest }}
+        run: |
+          gh attestation verify "$IMAGE_REF" \
+            --repo "$GITHUB_REPOSITORY" \
+            --predicate-type https://slsa.dev/provenance/v1
+          gh attestation verify "$IMAGE_REF" \
+            --repo "$GITHUB_REPOSITORY" \
+            --predicate-type https://spdx.dev/Document
+      # A smoke test, not a test suite: CI already ran pytest against the
+      # source. What is unproven here is that the *image* starts - a missing
+      # runtime dependency, a bad PYTHONPATH or an unwritable path for the
+      # unprivileged user would all pass CI and fail only at `docker run`.
+      # 127.0.0.1 is in the app's default trusted hosts, so no
+      # WEBSITE_TRUSTED_HOSTS is needed for a local probe.
+      - name: Boot the published image and probe /api/health
+        env:
+          IMAGE_REF: ${{ needs.publish.outputs.image }}@${{ needs.publish.outputs.digest }}
+        run: |
+          docker run --rm --init --detach --name smoke \
+            --publish 8000:8000 "$IMAGE_REF"
+          # Poll rather than sleep a fixed interval: uvicorn is usually up in
+          # under a second, and a hung start should fail fast with the logs.
+          for _ in $(seq 30); do
+            if curl -fsS --max-time 2 http://127.0.0.1:8000/api/health; then
+              echo "::notice::Published image booted and reported healthy."
+              docker rm --force smoke >/dev/null
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::The published image never answered /api/health."
+          docker logs smoke || true
+          docker rm --force smoke >/dev/null
+          exit 1

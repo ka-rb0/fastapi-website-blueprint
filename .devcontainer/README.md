@@ -124,7 +124,8 @@ The container runs as an unprivileged user and includes a health check for
 
 [publish.yml](../.github/workflows/publish.yml) builds this same
 `distribution` target on GitHub Actions and pushes it to
-`ghcr.io/<owner>/<repo>` (linux/amd64):
+`ghcr.io/<owner>/<repo>` as a multi-platform image (linux/amd64 and
+linux/arm64):
 
 | Trigger        | Tags published           |
 | -------------- | ------------------------ |
@@ -136,6 +137,17 @@ The pull-request build publishes nothing; it exists so a broken Dockerfile or
 an unbuildable lockfile fails the PR instead of `main`. Prereleases
 (`v1.2.3-rc.1`) publish their exact version only - they do not move `1.2` or
 `latest`.
+
+`sha-<short>` is published from `main` only, deliberately. A release tag is cut
+on a commit `main` already carries, so publishing it from tag runs too would
+rebuild that commit and repoint `sha-<short>` at a second, different digest -
+the build timestamp label alone is enough to change it. Two images of one
+commit is expected for the same reason: `main` and `latest` can differ byte for
+byte while describing identical source.
+
+Every published digest is signed with a build provenance attestation and an
+SPDX SBOM, and the workflow re-pulls and boots the image before going green -
+see [GitHub Setup](../docs/GITHUB_SETUP.md) for how to verify them yourself.
 
 Cutting a release is therefore just a tag, on a commit that is already on
 `main` - the workflow refuses to publish one that is not:

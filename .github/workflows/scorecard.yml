@@ -1,0 +1,77 @@
+# OpenSSF Scorecard grades this repository against ~18 supply-chain security
+# checks - are actions pinned to SHAs, is the default branch protected, do
+# workflow tokens use least privilege, are releases signed, is there a
+# vulnerability disclosure policy, and so on. Findings appear under the repo's
+# Security tab (Code scanning alerts), alongside CodeQL's.
+#
+# It grades the *repository's practices*, which is the gap the other workflows
+# leave: ci.yml audits dependencies, codeql.yml audits code, publish.yml signs
+# artifacts - none of them notice if, say, a ruleset gets disabled or a new
+# workflow lands with a floating action tag.
+#
+# `publish_results: true` sends the score to the public OpenSSF API, which is
+# what backs the score badge and the data deps.dev shows about this repo. It
+# also means the results are public - correct for a public template, and worth
+# a thought before enabling it on anything else.
+#
+# Free for PUBLIC repos only, on two counts: publishing results requires a
+# public repo, and the SARIF upload needs code scanning (paid GitHub Advanced
+# Security on private repos). If you clone/fork this repo and make it private,
+# delete this workflow.
+#
+# Same pinning rules as ci.yml: actions pinned to commit SHAs, kept current by
+# Dependabot.
+name: Scorecard
+
+on:
+  # Scorecard grades the default branch, so it only runs there.
+  push:
+    branches: [main]
+  # Re-grade when branch protection changes - several checks read it, and a
+  # weakened ruleset should not wait until the next scheduled run to surface.
+  branch_protection_rule:
+  schedule:
+    # Weekly, like codeql.yml and audit.yml, offset from both to stay off
+    # GitHub's cron load spikes. Scorecard's checks evolve, so an untouched
+    # repo's score can move on its own.
+    - cron: "41 4 * * 1"
+  # Manual runs from the Actions tab, e.g. to confirm a fix for a finding.
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# default to nothing; the job grants itself exactly what it needs
+permissions: {}
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read # checkout
+      security-events: write # upload the SARIF results to code scanning
+      id-token: write # sign the published results, same keyless flow as publish.yml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # don't leave the workflow token in .git/config for later steps
+          persist-credentials: false
+      - name: Run Scorecard
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+          # Left at the default GITHUB_TOKEN deliberately. The Branch-Protection
+          # check cannot read ruleset details with it and reports a reduced
+          # score; the alternative is a classic PAT with `repo` scope stored as
+          # a secret, and a long-lived, broadly-scoped token is a worse trade
+          # than one imprecise check. To opt in anyway, create the secret and
+          # add: repo_token: ${{ secrets.SCORECARD_TOKEN }}
+      # Publishes the findings as code scanning alerts. Same action version as
+      # codeql.yml uses - keep the two SHAs in step when Dependabot bumps them.
+      - uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+        with:
+          sarif_file: results.sarif

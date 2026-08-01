@@ -1,0 +1,25 @@
+{
+  "name": "Protect release tags",
+  "target": "tag",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/tags/v*"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    {
+      "type": "tag_name_pattern",
+      "parameters": {
+        "name": "v<major>.<minor>.<patch>, optionally -prerelease",
+        "negate": false,
+        "operator": "regex",
+        "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"
+      }
+    }
+  ],
+  "bypass_actors": []
+}

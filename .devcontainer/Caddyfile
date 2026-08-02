@@ -17,6 +17,16 @@ https://proxy.localhost {
 	# root certificate once; see .devcontainer/README.md.
 	tls internal
 
+	# Compress text responses at the proxy, never in the app: compression is
+	# CPU-bound work that would run on uvicorn's event loop and stall every
+	# other request on the same worker, which is why no GZipMiddleware exists
+	# in src/app/factory.py - the same division that leaves HSTS to the TLS
+	# terminator (see src/app/middleware.py). Caddy picks per request from
+	# what the client advertises and skips already-compressed types.
+	# Production ingress must do the same; a directly exposed container serves
+	# everything uncompressed (see "Compression" in docs/ARCHITECTURE.md).
+	encode zstd gzip
+
 	# Transport-level request-body cap at the trusted proxy, mirroring the
 	# app's own guard (DEFAULT_MAX_BODY_BYTES in src/app/config.py - Caddy's
 	# "1MB" is the same 10^6 bytes): oversized uploads are refused here before they

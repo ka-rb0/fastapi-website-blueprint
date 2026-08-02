@@ -184,6 +184,19 @@ def test_caddy_caps_request_body_size() -> None:
     assert "max_size 1MB" in caddyfile
 
 
+def test_caddy_compresses_responses() -> None:
+    """
+    The dev proxy compresses, because the app deliberately does not.
+
+    Compression is CPU-bound work that would run on uvicorn's event loop, so
+    it belongs to the proxy in the same way HSTS does - which means the dev
+    topology is the only place the repository can show a production ingress
+    what to do (see "Compression" in docs/ARCHITECTURE.md).
+    """
+    caddyfile = (DEVCONTAINER_DIR / "Caddyfile").read_text()
+    assert "encode zstd gzip" in caddyfile
+
+
 def test_compose_trusts_the_proxy_host() -> None:
     """The proxy backend's host allowlist includes Caddy's public site name."""
     environment = _compose_services()["proxy-backend"]["environment"]

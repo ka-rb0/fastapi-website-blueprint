@@ -495,9 +495,9 @@ Effectively every production deployment of this app sits behind an
 ingress or a TLS terminator, so the image has to be deployable behind one
 without a command override. It uses Uvicorn's public `UVICORN_*` environment
 interface directly for every server setting: host, port, root path, proxy
-headers, trusted proxy addresses and graceful-shutdown timeout. `WEBSITE_*` is
-reserved for application settings and Compose topology; there is no second
-image-specific server vocabulary to translate.
+headers, trusted proxy addresses, graceful-shutdown timeout, concurrency limit
+and server header. `WEBSITE_*` is reserved for application settings and Compose
+topology; there is no second image-specific server vocabulary to translate.
 
 The reverse-proxy subset is `UVICORN_ROOT_PATH`, `UVICORN_PROXY_HEADERS` and
 `UVICORN_FORWARDED_ALLOW_IPS`. They default to Uvicorn's behavior - no prefix,
@@ -534,6 +534,44 @@ generates. Uvicorn is lock-pinned, so those behavioral tests are also the
 upgrade gate: a future release that changes the public environment contract
 fails CI before it can change a deployed image. See also "Bounded graceful
 shutdown" above.
+
+### Backpressure (`UVICORN_LIMIT_CONCURRENCY`)
+
+Uvicorn accepts without limit by default, so a burst is taken in full and the
+process grows until the kernel OOM-kills it - losing the requests already in
+flight along with the ones that caused it. The image sets a ceiling instead:
+past it, uvicorn answers 503 from the protocol layer, before the application
+is reached, which is a response a load balancer can retry elsewhere while the
+replica keeps serving what it already accepted.
+
+The value bounds **connections, not requests in flight**. Uvicorn compares it
+against the open-connection count and the task count, whichever is larger, so
+an idle keep-alive connection holds a slot exactly like a running request
+does. A browser opens several connections per origin, so the default of 512 is
+on the order of 85 simultaneous visitors per replica, not 512 - size it
+against peak concurrent connections and raise it (or add replicas) rather than
+trimming it toward the request rate. Idle slots return after
+`--timeout-keep-alive`, 5 seconds by default.
+
+### No `Server` header (`UVICORN_SERVER_HEADER`)
+
+Uvicorn sends `Server: uvicorn` by default. The image turns it off: naming the
+stack only helps someone matching a deployment against known issues, and gains
+the deployment nothing - the same reasoning behind the response headers in
+`src/app/middleware.py`. `Date` stays on; HTTP caches need it and it
+identifies nothing.
+
+## Compression
+
+Compression is the reverse proxy's job, like HSTS above, and for a concrete
+reason: it is CPU-bound work, and in-process compression would run on
+uvicorn's event loop, stalling every other request that worker is handling.
+There is deliberately no `GZipMiddleware` in `src/app/factory.py`.
+
+The dev Caddy sidecar therefore sets `encode zstd gzip`, and a production
+ingress is expected to do the same. **A directly exposed container serves
+everything uncompressed** - one of the few places where the image alone is not
+a complete deployment.
 
 ## Testing strategy (`tests/`)
 

@@ -2,12 +2,11 @@
 Guards for running behind a reverse proxy: the dev Caddy topology, and the image.
 
 Two deployments of the same idea. The development half is Compose plus a
-Caddy sidecar, wired by the WEBSITE_REVERSE_PROXY_* variables; the
-distribution half is the image's entrypoint, whose WEBSITE_ROOT_PATH and
-WEBSITE_PROXY_TRUSTED_IPS carry the same two settings to wherever the image
-is deployed. The image's are exercised for real - no Docker in the dev
-container, so the tests run the entrypoint's own command line with the
-environment defaults the Dockerfile declares.
+Caddy sidecar and a dedicated Uvicorn backend; the distribution half is the
+published image. Both receive the same native UVICORN_* settings. The image's
+configuration is exercised for real - no Docker in the dev container, so the
+tests run its exec-form entrypoint with the environment defaults the
+Dockerfile declares.
 """
 
 import ipaddress
@@ -33,10 +32,16 @@ REPO_ROOT = Path(__file__).parent.parent
 DEVCONTAINER_DIR = REPO_ROOT / ".devcontainer"
 
 REVERSE_PROXY_VARIABLES = {
-    "WEBSITE_EXTERNAL_HTTP_PORT_WITH_REVERSE_PROXY",
-    "WEBSITE_EXTERNAL_HTTPS_PORT_WITH_REVERSE_PROXY",
-    "WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY",
-    "WEBSITE_REVERSE_PROXY_ROOT_PATH",
+    "WEBSITE_PROXY_HTTP_PORT",
+    "WEBSITE_PROXY_HTTPS_PORT",
+    "WEBSITE_PROXY_BACKEND_PORT",
+    "UVICORN_ROOT_PATH",
+}
+
+UVICORN_PROXY_VARIABLES = {
+    "UVICORN_ROOT_PATH",
+    "UVICORN_PROXY_HEADERS",
+    "UVICORN_FORWARDED_ALLOW_IPS",
 }
 
 
@@ -68,18 +73,18 @@ def test_reverse_proxy_example_environment_is_complete() -> None:
     environment = _example_environment()
     _assert_declared(environment, REVERSE_PROXY_VARIABLES)
 
-    root_path = environment["WEBSITE_REVERSE_PROXY_ROOT_PATH"]
+    root_path = environment["UVICORN_ROOT_PATH"]
     assert root_path.startswith("/")
     assert root_path != "/"
     assert not root_path.endswith("/")
 
     port_names = {
         "WEBSITE_EXTERNAL_PORT",
-        "WEBSITE_INTERNAL_PORT",
+        "UVICORN_PORT",
         *(
             name
             for name in REVERSE_PROXY_VARIABLES
-            if name.endswith("PORT_WITH_REVERSE_PROXY")
+            if name.startswith("WEBSITE_PROXY_") and name.endswith("_PORT")
         ),
     }
     _assert_declared(environment, port_names)
@@ -125,29 +130,29 @@ def test_caddy_image_is_versioned_and_digest_pinned() -> None:
 
 
 def test_caddy_is_independent_and_proxy_backend_stays_private() -> None:
-    """Removing Caddy cannot break master, and its Uvicorn port is not published."""
+    """The proxy topology cannot alter direct development or expose its backend."""
     services = _compose_services()
     master = services["master"]
+    backend = services["proxy-backend"]
     caddy = services["caddy"]
 
     assert "depends_on" not in master
+    assert "depends_on" not in backend
     assert "depends_on" not in caddy
-    assert "WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY" in master["environment"]
-    assert "WEBSITE_REVERSE_PROXY_ROOT_PATH" in master["environment"]
+    assert UVICORN_PROXY_VARIABLES.isdisjoint(master["environment"])
+    assert backend["environment"].keys() >= UVICORN_PROXY_VARIABLES
 
     published_ports = [
         port for service in services.values() for port in service.get("ports", [])
     ]
-    assert not any(
-        "WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY" in port for port in published_ports
-    )
+    assert not any("WEBSITE_PROXY_BACKEND_PORT" in port for port in published_ports)
 
 
 def test_reverse_proxy_trusted_ip_matches_caddys_pinned_address() -> None:
     """Uvicorn trusts exactly Caddy's pinned Compose-network address, not "*"."""
     compose = _compose()
     services = compose["services"]
-    trusted_ip = services["master"]["environment"]["WEBSITE_REVERSE_PROXY_TRUSTED_IP"]
+    trusted_ip = services["proxy-backend"]["environment"]["UVICORN_FORWARDED_ALLOW_IPS"]
     assert trusted_ip != "*"
 
     ((network_name, caddy_network),) = services["caddy"]["networks"].items()
@@ -157,13 +162,11 @@ def test_reverse_proxy_trusted_ip_matches_caddys_pinned_address() -> None:
     assert ipaddress.ip_address(trusted_ip) in ipaddress.ip_network(subnet)
 
 
-def test_caddy_strips_configured_prefix_to_second_uvicorn_listener() -> None:
+def test_caddy_strips_configured_prefix_to_private_uvicorn_backend() -> None:
     """The Caddyfile and Compose environment agree on the proxy contract."""
     caddyfile = (DEVCONTAINER_DIR / "Caddyfile").read_text()
-    assert "handle_path {$WEBSITE_REVERSE_PROXY_ROOT_PATH}/* {" in caddyfile
-    assert (
-        "reverse_proxy master:{$WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY}" in caddyfile
-    )
+    assert "handle_path {$UVICORN_ROOT_PATH}/* {" in caddyfile
+    assert "reverse_proxy proxy-backend:{$WEBSITE_PROXY_BACKEND_PORT}" in caddyfile
     assert "tls internal" in caddyfile
     assert "auto_https disable_redirects" in caddyfile
 
@@ -182,36 +185,20 @@ def test_caddy_caps_request_body_size() -> None:
 
 
 def test_compose_trusts_the_proxy_host() -> None:
-    """The dev container's host allowlist includes Caddy's public site name."""
-    environment = _compose_services()["master"]["environment"]
+    """The proxy backend's host allowlist includes Caddy's public site name."""
+    environment = _compose_services()["proxy-backend"]["environment"]
     trusted = environment["WEBSITE_TRUSTED_HOSTS"]
     assert "proxy.localhost" in trusted
 
 
-def _entrypoint_script() -> str:
-    """Return the shell command the distribution image's entrypoint runs."""
-    shell, flag, script, arg0 = distribution_entrypoint()
-    # `sh -c <script> <arg0> <args...>`: without a placeholder filling $0, the
-    # first run-time argument would land there and never reach uvicorn.
-    assert (shell, flag, arg0) == ("sh", "-c", "--")
-    return script
-
-
-def test_distribution_entrypoint_carries_the_proxy_settings() -> None:
-    """The image passes uvicorn both proxy settings, and lets arguments through."""
+def test_development_and_distribution_use_native_uvicorn_settings() -> None:
+    """Development and production expose one server-configuration contract."""
     environment = distribution_environment()
-    # Uvicorn's own defaults, so an image nobody configures behaves as before.
-    assert environment["WEBSITE_ROOT_PATH"] == ""
-    assert environment["WEBSITE_PROXY_TRUSTED_IPS"] == "127.0.0.1"
-
-    script = _entrypoint_script()
-    assert '--root-path "${WEBSITE_ROOT_PATH}"' in script
-    assert "--proxy-headers" in script
-    assert '--forwarded-allow-ips "${WEBSITE_PROXY_TRUSTED_IPS}"' in script
-    assert script.endswith('"$@"'), (
-        "run-time arguments must reach uvicorn last, or they cannot override"
-        " the defaults above"
-    )
+    assert environment.keys() >= UVICORN_PROXY_VARIABLES
+    assert environment["UVICORN_ROOT_PATH"] == ""
+    assert environment["UVICORN_PROXY_HEADERS"] == "true"
+    assert environment["UVICORN_FORWARDED_ALLOW_IPS"] == "127.0.0.1"
+    assert distribution_entrypoint() == ["uvicorn", "app.main:app"]
 
 
 @contextmanager
@@ -221,8 +208,8 @@ def _running_entrypoint(port: int, *extra_args: str, **overrides: str) -> Iterat
 
     The environment is the image's own ENV defaults plus `overrides`, and
     deliberately not this process's: what the image ships is the whole point,
-    and the dev container's own WEBSITE_* variables would otherwise decide the
-    outcome. PATH and PYTHONPATH stand in for the image's layout - the
+    and the dev container's ambient UVICORN_* variables would otherwise decide
+    the outcome. PATH and PYTHONPATH stand in for the image's layout - the
     entrypoint calls the `uvicorn` console script (which, unlike `python -m`,
     puts nothing on sys.path) and the image's PYTHONPATH=/src is this repo's
     src/ here.
@@ -231,7 +218,7 @@ def _running_entrypoint(port: int, *extra_args: str, **overrides: str) -> Iterat
         **distribution_environment(),
         "PATH": os.environ["PATH"],
         "PYTHONPATH": str(SRC_DIR),
-        "WEBSITE_INTERNAL_PORT": str(port),
+        "UVICORN_PORT": str(port),
         **overrides,
     }
     with run_server_command(
@@ -259,14 +246,18 @@ def _canonical_link(base_url: str) -> str:
 
 
 @pytest.mark.parametrize(
-    ("trusted_ips", "expected_scheme"),
-    [("127.0.0.1", "https"), ("10.0.0.1", "http")],
+    ("trusted_ips", "proxy_headers", "expected_scheme"),
+    [
+        ("127.0.0.1", "true", "https"),
+        ("10.0.0.1", "true", "http"),
+        ("127.0.0.1", "false", "http"),
+    ],
 )
 def test_image_honors_forwarded_proto_from_trusted_peers_only(
-    trusted_ips: str, expected_scheme: str
+    trusted_ips: str, proxy_headers: str, expected_scheme: str
 ) -> None:
     """
-    WEBSITE_PROXY_TRUSTED_IPS decides whose X-Forwarded-Proto the image believes.
+    Native Uvicorn settings decide whether and whose forwarded header is believed.
 
     Both halves are needed: that the header is honored at all only proves
     uvicorn's default (which happens to be the loopback this test connects
@@ -276,14 +267,18 @@ def test_image_honors_forwarded_proto_from_trusted_peers_only(
     canonical link (see "URL generation" in docs/ARCHITECTURE.md).
     """
     port = next_test_port()
-    with _running_entrypoint(port, WEBSITE_PROXY_TRUSTED_IPS=trusted_ips) as base_url:
+    with _running_entrypoint(
+        port,
+        UVICORN_FORWARDED_ALLOW_IPS=trusted_ips,
+        UVICORN_PROXY_HEADERS=proxy_headers,
+    ) as base_url:
         canonical = _canonical_link(base_url)
     assert canonical == f"{expected_scheme}://127.0.0.1:{port}/"
 
 
 def test_image_root_path_comes_from_the_environment_or_the_arguments() -> None:
     """
-    WEBSITE_ROOT_PATH prefixes generated URLs, and a run-time argument overrides it.
+    UVICORN_ROOT_PATH prefixes generated URLs, and a CLI argument overrides it.
 
     Uvicorn takes the last occurrence of a repeated option, which is what
     makes the appended flag win - how a deployment overrides any default this
@@ -291,12 +286,12 @@ def test_image_root_path_comes_from_the_environment_or_the_arguments() -> None:
     """
     port = next_test_port()
     with _running_entrypoint(
-        port, "--root-path", "/argument", WEBSITE_ROOT_PATH="/environment"
+        port, "--root-path", "/argument", UVICORN_ROOT_PATH="/environment"
     ) as base_url:
         canonical = _canonical_link(base_url)
     assert canonical == f"https://127.0.0.1:{port}/argument/"
 
     port = next_test_port()
-    with _running_entrypoint(port, WEBSITE_ROOT_PATH="/environment") as base_url:
+    with _running_entrypoint(port, UVICORN_ROOT_PATH="/environment") as base_url:
         canonical = _canonical_link(base_url)
     assert canonical == f"https://127.0.0.1:{port}/environment/"

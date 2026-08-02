@@ -150,8 +150,8 @@ own public address:
 
 Keeping the origin here makes the page depend on the app reconstructing
 it from the request, which behind a TLS-terminating proxy means
-uvicorn's `X-Forwarded-Proto` handling - and uvicorn honors that header
-only from peers listed in `--forwarded-allow-ips`, which defaults to
+Uvicorn's `X-Forwarded-Proto` handling - and Uvicorn honors that header
+only from peers listed in `UVICORN_FORWARDED_ALLOW_IPS`, which defaults to
 `127.0.0.1` and is therefore never the proxy in a container. A wrong
 reconstruction emits every asset URL as `http://` on an `https://` page,
 where the app's **own** CSP (`style-src 'self'`) blocks it as
@@ -170,7 +170,7 @@ with a bare `url_for`:
 A crawler needs the single address to index, and `/` is a different page
 on every host that serves it, so this URL has to carry the scheme and
 host. That makes it the one place the proxy-header configuration is
-load-bearing: a deployment that does not set `--forwarded-allow-ips`
+load-bearing: a deployment that does not set `UVICORN_FORWARDED_ALLOW_IPS`
 advertises an `http://` canonical for an HTTPS site. The failure is a
 wrong hint to search engines rather than a broken page, which is why
 this is the right - and only - URL to spend it on. The 404 page carries
@@ -473,9 +473,9 @@ app setting. Its default is _no_ limit - one request that never finishes
 process alive indefinitely after SIGTERM. Under an orchestrator that
 inverts the intent of a rolling deploy: the replica hangs until the
 termination grace period expires, then SIGKILL severs every connection,
-including the ones that were draining cleanly. So the distribution image
-passes `--timeout-graceful-shutdown "${WEBSITE_GRACEFUL_SHUTDOWN_SECONDS}"`
-(default 20s).
+including the ones that were draining cleanly. So the distribution image sets
+Uvicorn's native `UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN` environment value
+(default 20 seconds).
 
 The value is load-bearing only in relation to the orchestrator's own
 grace period - Kubernetes `terminationGracePeriodSeconds` (30s by
@@ -486,45 +486,54 @@ restores the original failure. Deployments whose requests legitimately
 outlive 20s must raise both, in that order.
 
 `tests/test_graceful_shutdown.py` pins the relationship in both
-directions: that the image's command carries a finite timeout, and that
+directions: that the image's environment carries a finite timeout, and that
 uvicorn actually abandons an in-flight request once it expires.
 
 ## Distribution image (`.devcontainer/Dockerfile`)
 
 Effectively every production deployment of this app sits behind an
 ingress or a TLS terminator, so the image has to be deployable behind one
-without a command override. Two settings decide whether it is, and both
-are environment variables the entrypoint passes to uvicorn:
-`WEBSITE_ROOT_PATH` (`--root-path`) and `WEBSITE_PROXY_TRUSTED_IPS`
-(`--forwarded-allow-ips`, alongside `--proxy-headers`). They default to
-uvicorn's own behavior - no prefix, loopback only - so a directly exposed
+without a command override. It uses Uvicorn's public `UVICORN_*` environment
+interface directly for every server setting: host, port, root path, proxy
+headers, trusted proxy addresses and graceful-shutdown timeout. `WEBSITE_*` is
+reserved for application settings and Compose topology; there is no second
+image-specific server vocabulary to translate.
+
+The reverse-proxy subset is `UVICORN_ROOT_PATH`, `UVICORN_PROXY_HEADERS` and
+`UVICORN_FORWARDED_ALLOW_IPS`. They default to Uvicorn's behavior - no prefix,
+proxy-header handling enabled and loopback only - so a directly exposed
 container is unchanged; left at those defaults behind a proxy, the site
 advertises an `http://` canonical link for an HTTPS deployment, logs the
-proxy's address as every client's, and drops the URL prefix from every
-link it generates (see "URL generation" above).
+proxy's address as every client's, and drops the URL prefix from every link it
+generates (see "URL generation" above).
 
-The names differ from the dev container's `WEBSITE_REVERSE_PROXY_*`
-variables on purpose: those configure the _second_ uvicorn listener that
-the Caddy sidecar talks to, next to a first one that has no proxy at all
-(see [QUICKSTART.md](QUICKSTART.md)). The image serves one listener, and
-names its settings after what they do to it.
+Development uses exactly the same contract. Its prefixed listener is a
+dedicated `proxy-backend` Compose service, separate from the `master`
+container's direct listener. That process boundary is what lets the backend
+receive `UVICORN_ROOT_PATH` without leaking the prefix into direct development
+or the test servers `master` launches. Caddy and the backend read the same
+root-path value, and the backend trusts only Caddy's pinned Compose-network
+address (see [QUICKSTART.md](QUICKSTART.md)).
 
 The command is an `ENTRYPOINT`, not a `CMD`, so run-time arguments are
-_appended_ to uvicorn's rather than replacing the whole command:
+_appended_ to Uvicorn's rather than replacing the whole command:
 `docker run <image> --root-path /shop`, or a Kubernetes `args:`, works
-without knowing what the image runs. Uvicorn takes the last occurrence of
-a repeated option, which is what makes an appended flag beat the
-environment default - the same reason the entrypoint ends in `"$@"`.
+without knowing what the image runs. Command-line values take precedence over
+`UVICORN_*` environment values. The entrypoint is the exec-form
+`["uvicorn", "app.main:app"]`: Uvicorn is PID 1 directly, with no shell and no
+project-specific configuration translation layer.
 Setting `ENTRYPOINT` also clears the `python3` `CMD` inherited from the
 base image, so nothing declares a `CMD` here; `docker run --entrypoint sh`
 is how you run something else.
 
 `tests/test_reverse_proxy_config.py` covers both halves of this, the dev
-topology and the image's, and the image's behaviorally: there is no
-Docker in the dev container, so it runs the entrypoint's own command line
-with the environment defaults the Dockerfile declares, and asserts on
-what the running app then generates. See also "Bounded graceful shutdown"
-above, the third flag the entrypoint passes.
+topology and the image's, and the image's behaviorally: there is no Docker in
+the dev container, so it runs the exec-form entrypoint with the environment
+defaults the Dockerfile declares, and asserts on what the running app then
+generates. Uvicorn is lock-pinned, so those behavioral tests are also the
+upgrade gate: a future release that changes the public environment contract
+fails CI before it can change a deployed image. See also "Bounded graceful
+shutdown" above.
 
 ## Testing strategy (`tests/`)
 

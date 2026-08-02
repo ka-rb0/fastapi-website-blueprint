@@ -16,14 +16,15 @@
 
 ## Run the server
 
-Run either command, or both in separate terminals.
+The proxy-backed server starts with the Dev Container. Start the direct server
+when you want unproxied HTTP as well.
 
 - Direct:
-  `uvicorn app.main:app --host 0.0.0.0 --port "$WEBSITE_INTERNAL_PORT" --reload`
-- Through Caddy (reverse proxy):
-  `uvicorn app.main:app --host 0.0.0.0 --port "$WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY" --reload --root-path "$WEBSITE_REVERSE_PROXY_ROOT_PATH" --proxy-headers --forwarded-allow-ips="$WEBSITE_REVERSE_PROXY_TRUSTED_IP"`
-  (defaults to Caddy's pinned Compose-network address, not `*` - see
-  docs/QUICKSTART.md before reusing this pattern in production)
+  `uvicorn app.main:app --reload` (`UVICORN_HOST` and `UVICORN_PORT` come from
+  Compose)
+- Through Caddy: the `proxy-backend` Compose service runs Uvicorn with the
+  same native `UVICORN_*` settings documented for production in
+  [QUICKSTART.md](QUICKSTART.md).
 
 ## Tests
 

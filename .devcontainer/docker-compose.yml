@@ -1,17 +1,20 @@
 # Caddy's address on the reverse-proxy network, pinned (see the network's
-# ipam config below) so uvicorn can trust exactly that peer for X-Forwarded-*
+# ipam config below) so Uvicorn can trust exactly that peer for X-Forwarded-*
 # instead of trusting the whole network with "*". One literal, referenced
-# from both the network's static assignment and master's trust config below,
-# so the two can't drift apart.
+# from both the network's static assignment and the proxy backend's native
+# Uvicorn configuration below, so the two can't drift apart.
 x-caddy-ip: &caddy_ip 172.28.238.2
+
+x-development-build: &development_build
+  context: ..
+  dockerfile: .devcontainer/Dockerfile
 
 services:
   master:
     build:
       # Build from the repo root so the lockfiles are available, and stop at
       # the desktop agent stage. The distribution branch is not built.
-      context: ..
-      dockerfile: .devcontainer/Dockerfile
+      <<: *development_build
       target: agent
     # A real PID 1 that reaps orphans - `sleep infinity` doesn't, and a
     # devcontainer spawns many short-lived processes (VS Code server, test
@@ -39,17 +42,11 @@ services:
       PYTHONDONTWRITEBYTECODE: 1
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       DATA_PATH: ${DATA_PATH}
-      WEBSITE_INTERNAL_PORT: ${WEBSITE_INTERNAL_PORT:?set it in .devcontainer/.env, see .env.example}
-      # A second, Compose-network-only Uvicorn listener used by Caddy. It is
-      # started manually just like the direct development server, but with a
-      # root path and trusted proxy headers (see docs/QUICKSTART.md).
-      WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY: ${WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY:?set it in .devcontainer/.env, see .env.example}
-      WEBSITE_REVERSE_PROXY_ROOT_PATH: ${WEBSITE_REVERSE_PROXY_ROOT_PATH:?set it in .devcontainer/.env, see .env.example}
-      # The only peer trusted to set X-Forwarded-* on that second listener
-      # (see docs/QUICKSTART.md) - Caddy's pinned address below, not "*". A
-      # deployment that reuses this pattern behind a different reverse proxy
-      # must point this at that proxy's real address instead.
-      WEBSITE_REVERSE_PROXY_TRUSTED_IP: *caddy_ip
+      # Native server settings for the direct development listener. Proxy-only
+      # settings belong to the separate proxy-backend service below, so no
+      # root path can leak into this process or the test servers it launches.
+      UVICORN_HOST: 0.0.0.0
+      UVICORN_PORT: ${UVICORN_PORT:?set it in .devcontainer/.env, see .env.example}
       # Host-header allowlist (Settings.trusted_hosts in src/app/config.py):
       # the code's local default plus proxy.localhost, the public name whose
       # requests Caddy forwards. Overridable from .env, e.g. to add a LAN IP
@@ -70,10 +67,43 @@ services:
       - NET_RAW
     ports:
       # 127.0.0.1 is only reachable from this machine, 0.0.0.0 exposes it to the LAN.
-      - "${WEBSITE_BIND_HOST:-127.0.0.1}:${WEBSITE_EXTERNAL_PORT:?set it in .devcontainer/.env, see .env.example}:${WEBSITE_INTERNAL_PORT}"
+      - "${WEBSITE_BIND_HOST:-127.0.0.1}:${WEBSITE_EXTERNAL_PORT:?set it in .devcontainer/.env, see .env.example}:${UVICORN_PORT}"
     networks:
       - fastapi-website-blueprint-network
     command: sleep infinity
+
+  # A separate process gets the same native UVICORN_* reverse-proxy contract
+  # as the distribution image. Keeping it outside master prevents its root
+  # path from affecting the direct development listener or test subprocesses.
+  proxy-backend:
+    build:
+      <<: *development_build
+      # The server needs dev's reload support, not the agent CLIs.
+      target: dev
+    init: true
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace:ro
+    environment:
+      PYTHONPATH: /workspace/src
+      PYTHONDONTWRITEBYTECODE: 1
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      UVICORN_HOST: 0.0.0.0
+      UVICORN_PORT: ${WEBSITE_PROXY_BACKEND_PORT:?set it in .devcontainer/.env, see .env.example}
+      UVICORN_RELOAD: "true"
+      UVICORN_ROOT_PATH: ${UVICORN_ROOT_PATH:?set it in .devcontainer/.env, see .env.example}
+      UVICORN_PROXY_HEADERS: "true"
+      # Trust only Caddy's pinned address, never every network peer.
+      UVICORN_FORWARDED_ALLOW_IPS: *caddy_ip
+      WEBSITE_TRUSTED_HOSTS: ${WEBSITE_TRUSTED_HOSTS:-localhost,127.0.0.1,proxy.localhost}
+      WEBSITE_ENABLE_DOCS: ${WEBSITE_ENABLE_DOCS:-1}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - NET_RAW
+    command: ["uvicorn", "app.main:app"]
+    networks:
+      - fastapi-website-blueprint-network
 
   caddy:
     # Caddy is development infrastructure, not part of the distribution image.
@@ -83,9 +113,9 @@ services:
     image: caddy:2.11.3-alpine@sha256:86deaf5e3d3408a6ccec08fbb79989783dd26e206ae10bcf78a801dc8c9ab794
     init: true
     environment:
-      WEBSITE_EXTERNAL_HTTPS_PORT_WITH_REVERSE_PROXY: ${WEBSITE_EXTERNAL_HTTPS_PORT_WITH_REVERSE_PROXY:?set it in .devcontainer/.env, see .env.example}
-      WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY: ${WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY:?set it in .devcontainer/.env, see .env.example}
-      WEBSITE_REVERSE_PROXY_ROOT_PATH: ${WEBSITE_REVERSE_PROXY_ROOT_PATH:?set it in .devcontainer/.env, see .env.example}
+      WEBSITE_PROXY_HTTPS_PORT: ${WEBSITE_PROXY_HTTPS_PORT:?set it in .devcontainer/.env, see .env.example}
+      WEBSITE_PROXY_BACKEND_PORT: ${WEBSITE_PROXY_BACKEND_PORT:?set it in .devcontainer/.env, see .env.example}
+      UVICORN_ROOT_PATH: ${UVICORN_ROOT_PATH:?set it in .devcontainer/.env, see .env.example}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       # Persist Caddy's local development CA so its root certificate stays
@@ -100,8 +130,8 @@ services:
       # The official image listens on the standard HTTP/HTTPS ports.
       - NET_BIND_SERVICE
     ports:
-      - "127.0.0.1:${WEBSITE_EXTERNAL_HTTP_PORT_WITH_REVERSE_PROXY:?set it in .devcontainer/.env, see .env.example}:80"
-      - "127.0.0.1:${WEBSITE_EXTERNAL_HTTPS_PORT_WITH_REVERSE_PROXY:?set it in .devcontainer/.env, see .env.example}:443"
+      - "127.0.0.1:${WEBSITE_PROXY_HTTP_PORT:?set it in .devcontainer/.env, see .env.example}:80"
+      - "127.0.0.1:${WEBSITE_PROXY_HTTPS_PORT:?set it in .devcontainer/.env, see .env.example}:443"
     networks:
       fastapi-website-blueprint-network:
         ipv4_address: *caddy_ip

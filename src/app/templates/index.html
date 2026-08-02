@@ -8,7 +8,7 @@
       index, and "/" names a different page on every host that serves it. It
       carries the scheme and host from the request, so it is only correct when
       the deployment tells uvicorn which proxy to trust
-      (--forwarded-allow-ips, see docs/QUICKSTART.md) - and only ever names a
+      (UVICORN_FORWARDED_ALLOW_IPS, see docs/QUICKSTART.md) - and only ever names a
       host on the WEBSITE_TRUSTED_HOSTS allowlist, which is what stops a
       spoofed Host from pointing search engines elsewhere. Not on the 404
       page: a canonical link there would tell crawlers a missing address is

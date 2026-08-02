@@ -3,7 +3,7 @@ Shared fixtures: live uvicorn servers, started once per session.
 
 The servers listen on consecutive ports from the inclusive range
 $WEBSITE_TEST_PORT_MIN..$WEBSITE_TEST_PORT_MAX so the dev server on
-$WEBSITE_INTERNAL_PORT can stay up. No httpx / TestClient dependency - API tests
+$UVICORN_PORT can stay up. No httpx / TestClient dependency - API tests
 hit the live servers with urllib.
 """
 

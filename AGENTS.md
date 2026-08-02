@@ -34,7 +34,7 @@ Run `scripts/lint` and `scripts/test` before declaring work done.
 ## Conventions
 
 - Design rationale lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) -
-  read it before simplifying middleware, CSP, error-handling or
+  read it before simplifying middleware, CSP, error-handling, logging or
   configuration code; several decisions there exist to prevent regressions
   that only show up in deployments the test suite cannot fully reproduce.
 - Never compare `scope["path"]` or `request.url.path` against a route string

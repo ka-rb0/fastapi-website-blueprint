@@ -18,8 +18,8 @@ safe because `include_router` copies its routes into each app. Two
 coexist in one process.
 
 `create_app` returns the concrete outermost wrapper
-(`SecurityHeadersMiddleware`), not an opaque `ASGIApp`: the class is
-public API, and the concrete type is what lets tests and embedding code
+(`RequestIDMiddleware`), not an opaque `ASGIApp`: the classes are
+public API, and the concrete types are what let tests and embedding code
 unwrap to the FastAPI instance (`framework_app` in `tests/helpers.py`)
 instead of guessing at private attributes.
 
@@ -35,16 +35,18 @@ The wrapper order returned by `create_app` is deliberate and asserted by
 in-process test goes through:
 
 ```text
-SecurityHeadersMiddleware        <- outermost: stamps every response
-  BodySizeLimitMiddleware        <- its 413s must carry the headers
-    FastAPI (ServerErrorMiddleware, TrustedHostMiddleware, routers, ...)
+RequestIDMiddleware              <- outermost: nothing below it logs or
+  SecurityHeadersMiddleware         answers without a correlation ID
+    BodySizeLimitMiddleware      <- its 413s must carry both
+      FastAPI (ServerErrorMiddleware, TrustedHostMiddleware, routers, ...)
 ```
 
-Both wrappers are pure ASGI classes, _not_ `add_middleware`, because
+All three wrappers are pure ASGI classes, _not_ `add_middleware`, because
 Starlette places user middleware inside its outermost
 `ServerErrorMiddleware`: a 500 generated for an unhandled exception would
 skip `add_middleware`-registered middleware and leave without security
-headers. Wrapping the finished app keeps even those 500s stamped.
+headers - or, for the same reason, without an ID to find it by. Wrapping
+the finished app keeps even those 500s stamped and correlated.
 
 ## Settings (`src/app/config.py`)
 
@@ -230,6 +232,135 @@ framework stack produce a framework-shaped 413 (same JSON shape as a
 time the stream exceeds the cap, the endpoint is mid-request and only
 the framework knows whether a response has already started.
 
+## Request correlation (`src/app/observability.py`, `src/app/middleware.py`)
+
+Every request gets an ID. `RequestIDMiddleware` binds it to a
+`ContextVar` for the duration of the request, echoes it on the response
+as `X-Request-ID`, and `configure_logging` puts a `%(request_id)s` field
+on every log record - so "it broke at 14:32" becomes one grep, and the
+reporter can read the ID straight off the response without log access.
+
+A context variable rather than something hung on the request, because
+the code that logs is usually the code that never sees a request object:
+a helper three calls down, a library logger. On a clean exit it is reset
+on the way out of the middleware - each ASGI request already runs in its
+own context, but that is the server's guarantee, not this app's, and an
+app embedded in someone else's task must not leak an ID into whatever
+runs next.
+
+**When an exception is unwinding, the binding is deliberately kept.**
+Uvicorn catches an unhandled exception _above_ this middleware and only
+then logs the traceback ("Exception in ASGI application") - the one
+record an operator most wants to find by ID, and the reason resetting in
+a `finally` would be wrong: the reset would run mid-unwind, before
+uvicorn logs, and file the traceback under `-`. The retained binding
+dies with the request's context under any conforming ASGI server, which
+runs each request in a context of its own. A host that instead catches
+the exception in a task it keeps is left holding the stale ID: whatever
+it logs in that context afterwards carries it, and because
+`ContextVar.reset` restores the _previous_ value, the next clean request
+through the middleware restores the stale ID rather than `-`. That is
+the deliberate price of correlating the traceback - within one context
+the two are mutually exclusive - and such a host recovers the guarantee
+the moment it does what servers do: run each request in its own context
+copy. `tests/test_request_id.py` pins both halves: reset after a clean
+response, kept where the server's error logger runs.
+
+A task spawned while a request is in flight inherits the request's ID -
+`asyncio.create_task` copies the context - and keeps it after the
+response completes, the parent's reset notwithstanding. Deliberate:
+background work caused by a request belongs to that request's trace,
+and the copied context is how the ID follows the work the same way it
+follows a call stack. A detached job that deserves a trace of its own
+rebinds with `bind_request_id(None)`, which always mints.
+
+Only `http` scopes are correlated. A WebSocket connection passes through
+the middleware untouched, so adding WebSocket routes means extending it -
+and deciding what one ID should span for a long-lived connection.
+
+Outermost in the stack (see "Composition root"), so responses produced
+without an endpoint ever running - a body-cap 413, a rejected `Host`, an
+unhandled exception's 500 - are findable by the same ID the client got
+back. Those are the responses somebody actually goes looking for.
+
+**Inbound IDs are kept, after a shape check.** A gateway or upstream
+service that already picked an ID gets one trace across the whole call
+chain instead of two unlinkable ones, which is the entire point of the
+header. The check is the shape and nothing else - 1 to 64 visible ASCII
+characters - because a correlation ID is an opaque token this app never
+interprets; 64 admits a UUID, a 32-character hex string or a W3C
+`traceparent`. Excluding space, the control characters and everything
+non-ASCII is what makes echoing a client-supplied value safe: it can
+neither split the response header nor forge a line in the log. Uvicorn's
+parser already refuses most of those requests outright, so the guard is
+the backstop for laxer hops - `tests/test_request_id.py` therefore tests
+it directly rather than over the wire. Anything unusable is _replaced_,
+never rejected: correlation is a diagnostic, and failing a request over
+a cosmetic header would turn an upstream's bug into an outage.
+
+The tradeoff of accepting the header is that a client can choose its own
+ID and so name a trace after someone else's. That buys confusion in a
+forensic search, nothing more - an ID authenticates nothing and grants
+nothing - and the usual answer is to have the edge proxy overwrite the
+header. A deployment that would rather not trust callers at all can drop
+the `candidate` argument in `bind_request_id` and always mint.
+
+**Uvicorn's loggers are adopted, not just the root logger.** Uvicorn
+installs handlers on `uvicorn`/`uvicorn.access` and turns propagation
+off, so its access line - the one line per request that says _which_
+request - would be the one line without the ID. `configure_logging`
+empties those handler lists and turns propagation back on, leaving the
+process with a single handler on stdout: one formatter, so the ID is
+everywhere, and one stream, so app and access lines cannot interleave
+out of order the way two buffered ones do. Their levels become `NOTSET`
+so they inherit the root level, which makes `LOG_LEVEL` mean what it
+says instead of losing to uvicorn's hardcoded INFO. That one knob cuts
+both ways: access lines are INFO, so `LOG_LEVEL=WARNING` quiets the
+per-request line along with the app - deliberate, but worth knowing
+before turning the level down in an incident.
+
+That happens when `app.main` is imported - the executable boundary, not
+`create_app` or the lifespan. Logging is deployment policy, and an
+embeddable app that reconfigured the process from library code would
+reach into every host that mounts it: its pytest capture, its JSON
+pipeline, its `--log-config`. A host that never imports `app.main`
+keeps its logging untouched and opts in by calling `configure_logging`
+itself (exported from the package root for exactly that). The ordering
+needs no flag to remember, because uvicorn configures its own logging
+when its `Config` is constructed and imports the application module
+afterwards - so the import wins. It wins under `--reload` and
+`--workers` as well, where each child process re-runs uvicorn's setup
+before loading the app.
+
+Winning that race is the point, and it is also the sharp edge: importing
+`app.main` silently **overrides the root and Uvicorn portions of
+`uvicorn --log-config`**. An operator who points that flag at a JSON
+pipeline for those loggers gets this module's human-readable format
+instead, with nothing in the log to say that configuration was replaced.
+Explicitly named non-Uvicorn loggers may retain handlers from the flag,
+however, because this module leaves existing loggers enabled; the result
+can therefore be mixed rather than a complete override. That is the
+standing cost of claiming logging from the application module, and it is
+the arrangement most likely to be hit, because `--log-config` is
+uvicorn's documented way to reshape logs for a deployment. A deployment
+that needs the flag honored should serve an entry point of its own that
+calls `create_app` and never imports `app.main`.
+
+The second arrangement that degrades does so in the other direction:
+handing an already-imported app object to `uvicorn.run()` lets uvicorn's
+later setup reclaim its own loggers, and the access line loses the ID.
+The documented string entry point, `uvicorn app.main:app`, avoids that
+second problem but retains the `--log-config` tradeoff above.
+
+The format is human-readable rather than JSON: this is what a developer
+tails locally, and a blueprint should not presume a log pipeline.
+Swapping in a JSON formatter is a change to `LOG_FORMAT` and the
+formatter class beside it - the ID reaches the record either way,
+because `RequestIDFilter` is what puts it there. The same seam is where
+OpenTelemetry would go: `bind_request_id` is the one place that decides
+what a request is correlated by, so parsing `traceparent` into a real
+trace context means changing that function, not the middleware.
+
 ## Branded 404 (`src/app/exceptions.py`)
 
 Registered on status code `404`, not on `StarletteHTTPException`, so
@@ -280,13 +411,25 @@ a closure over its settings, like the pages router, so runtime code
 never reads configuration back off `app.state` (state is an
 introspection point for tests and embedding code only).
 
-Logging is configured at startup, not import: importing the package
-(tests, tooling) must not reconfigure the process-wide root logger.
-Note that `logging.basicConfig` is still process-global and first-wins -
-when several apps run in one process, the first lifespan to start
-determines the root log level. That is an accepted limitation: per-app
-isolation covers routing, templates and middleware, not process-wide
-services.
+The lifespan deliberately does not configure logging: that is
+deployment policy, claimed by the process entry point (`app.main` - see
+"Request correlation" above), and a lifespan that reconfigured it would
+run inside every host that mounts this app, test runners included.
+Importing the _package_ stays side-effect free; only importing
+`app.main` takes ownership of process-wide logging. Several apps in one
+process therefore have nothing left to contend for - whoever owns the
+entry point owns logging, the one process-wide service per-app
+isolation never covered.
+
+What the lifespan does own is the startup echo: the settings the
+instance actually booted with, logged once. `app.config` refuses to
+boot on invalid settings, and that strictness is only auditable if the
+configuration that survived is visible in the log. The one value the
+echo counts rather than names is the trusted-host allowlist: it can
+carry internal hostnames, and a log line outlives the process that
+wrote it (aggregators, bug reports, support tickets), so the echo
+answers "how many hosts survived validation" and leaves "which ones" to
+the deployment's own configuration.
 
 ### Bounded graceful shutdown (`.devcontainer/Dockerfile`)
 

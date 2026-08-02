@@ -8,8 +8,8 @@ from starlette.types import ASGIApp, Message, Scope
 
 from app.config import DEFAULT_MAX_BODY_BYTES, DEFAULT_TRUSTED_HOSTS, Settings
 from app.factory import create_app
-from app.middleware import DOCS_CSP, SECURITY_HEADERS, BodySizeLimitMiddleware
-from tests.helpers import framework_app
+from app.middleware import DOCS_CSP, SECURITY_HEADERS
+from tests.helpers import body_limited_app, framework_app, security_headers_app
 
 
 def _get(
@@ -92,12 +92,10 @@ def test_factory_keeps_application_configurations_isolated() -> None:
     }
     assert {"/docs", "/openapi.json"} <= docs_paths
     assert {"/docs", "/openapi.json"}.isdisjoint(production_paths)
-    assert docs_app.docs_enabled is True
-    assert production_app.docs_enabled is False
-    assert isinstance(docs_app.app, BodySizeLimitMiddleware)
-    assert isinstance(production_app.app, BodySizeLimitMiddleware)
-    assert docs_app.app.max_body_bytes == 1_024
-    assert production_app.app.max_body_bytes == 2_048
+    assert security_headers_app(docs_app).docs_enabled is True
+    assert security_headers_app(production_app).docs_enabled is False
+    assert body_limited_app(docs_app).max_body_bytes == 1_024
+    assert body_limited_app(production_app).max_body_bytes == 2_048
 
     docs_status, docs_headers, docs_body = _get(docs_app, "/docs", host="docs.example")
     production_status, production_headers, _ = _get(

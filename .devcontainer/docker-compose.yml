@@ -56,11 +56,10 @@ services:
       # when testing from a phone (see .env.example).
       WEBSITE_TRUSTED_HOSTS: ${WEBSITE_TRUSTED_HOSTS:-localhost,127.0.0.1,proxy.localhost}
       # The inclusive port range the test suite's own uvicorn servers bind,
-      # one consecutive port per server fixture (tests/conftest.py) - kept
-      # apart from the dev server ports so the dev server can stay up during
-      # a test run.
-      WEBSITE_TEST_PORT_MIN: ${WEBSITE_TEST_PORT_MIN:-20177}
-      WEBSITE_TEST_PORT_MAX: ${WEBSITE_TEST_PORT_MAX:-20182}
+      # one consecutive port each (tests/conftest.py) - kept apart from the
+      # dev server ports so the dev server can stay up during a test run.
+      WEBSITE_TEST_PORT_MIN: ${WEBSITE_TEST_PORT_MIN:-11120}
+      WEBSITE_TEST_PORT_MAX: ${WEBSITE_TEST_PORT_MAX:-11199}
       # Interactive API docs (/docs) are a dev tool: on by default in this
       # dev container, off anywhere the variable isn't set (production).
       WEBSITE_ENABLE_DOCS: ${WEBSITE_ENABLE_DOCS:-1}

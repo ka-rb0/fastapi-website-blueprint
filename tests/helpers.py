@@ -6,22 +6,39 @@ from typing import NamedTuple
 
 from fastapi import FastAPI
 
-from app.middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware
+from app.middleware import (
+    BodySizeLimitMiddleware,
+    RequestIDMiddleware,
+    SecurityHeadersMiddleware,
+)
 
 
-def framework_app(application: SecurityHeadersMiddleware) -> FastAPI:
+def security_headers_app(application: RequestIDMiddleware) -> SecurityHeadersMiddleware:
+    """Return the header stamp after asserting correlation wraps it."""
+    assert isinstance(application, RequestIDMiddleware)
+    assert isinstance(application.app, SecurityHeadersMiddleware)
+    return application.app
+
+
+def body_limited_app(application: RequestIDMiddleware) -> BodySizeLimitMiddleware:
+    """Return the body guard after asserting the two wrappers above it."""
+    inner = security_headers_app(application).app
+    assert isinstance(inner, BodySizeLimitMiddleware)
+    return inner
+
+
+def framework_app(application: RequestIDMiddleware) -> FastAPI:
     """
     Return the FastAPI instance after asserting the production wrapper order.
 
-    The isinstance chain is itself a test: header stamp outermost, body guard
-    inside it, framework innermost (see "Composition root" in
-    docs/ARCHITECTURE.md). Every in-process test unwraps through here, so a
-    reordered stack fails loudly everywhere at once.
+    The isinstance chain is itself a test: correlation outermost, header stamp
+    inside it, then the body guard, framework innermost (see "Composition
+    root" in docs/ARCHITECTURE.md). Every in-process test unwraps through
+    here, so a reordered stack fails loudly everywhere at once.
     """
-    assert isinstance(application, SecurityHeadersMiddleware)
-    assert isinstance(application.app, BodySizeLimitMiddleware)
-    assert isinstance(application.app.app, FastAPI)
-    return application.app.app
+    inner = body_limited_app(application).app
+    assert isinstance(inner, FastAPI)
+    return inner
 
 
 class EmittedUrl(NamedTuple):

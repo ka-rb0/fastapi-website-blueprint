@@ -7,19 +7,23 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .config import Settings
 from .exceptions import register_exception_handlers
 from .lifecycle import create_lifespan
-from .middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware
+from .middleware import (
+    BodySizeLimitMiddleware,
+    RequestIDMiddleware,
+    SecurityHeadersMiddleware,
+)
 from .routers import api_router, create_pages_router
 from .templating import STATIC_DIR, create_templates
 
 APP_TITLE = "FastAPI Website Blueprint"
 
 
-def create_app(settings: Settings) -> SecurityHeadersMiddleware:
+def create_app(settings: Settings) -> RequestIDMiddleware:
     """
     Build a fully configured, independently testable application stack.
 
-    Returns the concrete outermost wrapper, not an opaque ASGIApp: the class
-    is public API, and the concrete type is what lets tests and embedding
+    Returns the concrete outermost wrapper, not an opaque ASGIApp: the classes
+    are public API, and the concrete types are what let tests and embedding
     code unwrap to the FastAPI instance without guessing at private
     attributes (see framework_app in tests/helpers.py).
     """
@@ -51,11 +55,13 @@ def create_app(settings: Settings) -> SecurityHeadersMiddleware:
     # (see app.exceptions) turns into the branded page.
     fastapi_app.mount("/", StaticFiles(directory=STATIC_DIR), name="static")
 
-    # Wrapper order is load-bearing - headers outermost, so even the body
-    # guard's 413s are stamped. See "Composition root" in docs/ARCHITECTURE.md.
+    # Wrapper order is load-bearing - correlation outermost, so nothing below
+    # can log or answer without an ID, then headers, so even the body guard's
+    # 413s are stamped. See "Composition root" in docs/ARCHITECTURE.md.
     body_limited_app = BodySizeLimitMiddleware(
         fastapi_app, max_body_bytes=settings.max_body_bytes
     )
-    return SecurityHeadersMiddleware(
+    header_stamped_app = SecurityHeadersMiddleware(
         body_limited_app, docs_enabled=settings.docs_enabled
     )
+    return RequestIDMiddleware(header_stamped_app)

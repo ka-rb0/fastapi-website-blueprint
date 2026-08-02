@@ -25,12 +25,26 @@ def create_lifespan(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        # Startup, not import time: importing the package must not alter the
-        # process-wide root logger. basicConfig is still process-global and
-        # first-wins: with several apps in one process, the first lifespan to
-        # start sets the root log level (see docs/ARCHITECTURE.md).
-        logging.basicConfig(level=settings.log_level)
+        # Deliberately no logging configuration here: logging is deployment
+        # policy, owned by the process entry point (app.main, or an embedding
+        # host's own setup) - a lifespan that reconfigured it would run inside
+        # every host that mounts this app (see docs/ARCHITECTURE.md).
         logger.info("Serving static files from %s", STATIC_DIR)
+        # Echo the surviving configuration once: app.config refuses to boot on
+        # invalid settings, and that strictness is only auditable if what an
+        # instance actually booted with is visible in its log. The host
+        # allowlist is counted, not named: it is the one setting here whose
+        # value can carry internal hostnames, and logs travel further than the
+        # deployment does (aggregators, bug reports, support tickets). The
+        # count still shows an empty-vs-default-vs-configured allowlist, which
+        # is what the echo is for. CodeQL flags the named form as clear-text
+        # logging of a secret for the same reason.
+        logger.info(
+            "Trusted hosts: %d configured; docs %s; request bodies capped at %d bytes",
+            len(settings.trusted_hosts),
+            "enabled" if settings.docs_enabled else "disabled",
+            settings.max_body_bytes,
+        )
         yield
 
     return lifespan

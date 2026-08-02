@@ -1,11 +1,33 @@
-"""Guards for the optional development Caddy topology."""
+"""
+Guards for running behind a reverse proxy: the dev Caddy topology, and the image.
+
+Two deployments of the same idea. The development half is Compose plus a
+Caddy sidecar, wired by the WEBSITE_REVERSE_PROXY_* variables; the
+distribution half is the image's entrypoint, whose WEBSITE_ROOT_PATH and
+WEBSITE_PROXY_TRUSTED_IPS carry the same two settings to wherever the image
+is deployed. The image's are exercised for real - no Docker in the dev
+container, so the tests run the entrypoint's own command line with the
+environment defaults the Dockerfile declares.
+"""
 
 import ipaddress
+import os
 import re
+import urllib.request
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
+
+from .conftest import SRC_DIR, next_test_port, run_server_command
+from .helpers import (
+    distribution_entrypoint,
+    distribution_environment,
+    emitted_urls,
+)
 
 REPO_ROOT = Path(__file__).parent.parent
 DEVCONTAINER_DIR = REPO_ROOT / ".devcontainer"
@@ -164,3 +186,117 @@ def test_compose_trusts_the_proxy_host() -> None:
     environment = _compose_services()["master"]["environment"]
     trusted = environment["WEBSITE_TRUSTED_HOSTS"]
     assert "proxy.localhost" in trusted
+
+
+def _entrypoint_script() -> str:
+    """Return the shell command the distribution image's entrypoint runs."""
+    shell, flag, script, arg0 = distribution_entrypoint()
+    # `sh -c <script> <arg0> <args...>`: without a placeholder filling $0, the
+    # first run-time argument would land there and never reach uvicorn.
+    assert (shell, flag, arg0) == ("sh", "-c", "--")
+    return script
+
+
+def test_distribution_entrypoint_carries_the_proxy_settings() -> None:
+    """The image passes uvicorn both proxy settings, and lets arguments through."""
+    environment = distribution_environment()
+    # Uvicorn's own defaults, so an image nobody configures behaves as before.
+    assert environment["WEBSITE_ROOT_PATH"] == ""
+    assert environment["WEBSITE_PROXY_TRUSTED_IPS"] == "127.0.0.1"
+
+    script = _entrypoint_script()
+    assert '--root-path "${WEBSITE_ROOT_PATH}"' in script
+    assert "--proxy-headers" in script
+    assert '--forwarded-allow-ips "${WEBSITE_PROXY_TRUSTED_IPS}"' in script
+    assert script.endswith('"$@"'), (
+        "run-time arguments must reach uvicorn last, or they cannot override"
+        " the defaults above"
+    )
+
+
+@contextmanager
+def _running_entrypoint(port: int, *extra_args: str, **overrides: str) -> Iterator[str]:
+    """
+    Run the distribution image's entrypoint locally, as Docker would run it.
+
+    The environment is the image's own ENV defaults plus `overrides`, and
+    deliberately not this process's: what the image ships is the whole point,
+    and the dev container's own WEBSITE_* variables would otherwise decide the
+    outcome. PATH and PYTHONPATH stand in for the image's layout - the
+    entrypoint calls the `uvicorn` console script (which, unlike `python -m`,
+    puts nothing on sys.path) and the image's PYTHONPATH=/src is this repo's
+    src/ here.
+    """
+    environment = {
+        **distribution_environment(),
+        "PATH": os.environ["PATH"],
+        "PYTHONPATH": str(SRC_DIR),
+        "WEBSITE_INTERNAL_PORT": str(port),
+        **overrides,
+    }
+    with run_server_command(
+        # --host, because the image binds 0.0.0.0 and a test server has no
+        # business on this machine's other interfaces. That it takes effect at
+        # all is the argument pass-through working.
+        [*distribution_entrypoint(), "--host", "127.0.0.1", *extra_args],
+        port,
+        environment,
+        cwd=REPO_ROOT,
+    ) as base_url:
+        yield base_url
+
+
+def _canonical_link(base_url: str) -> str:
+    """Return the homepage's canonical URL, requested as a TLS proxy would."""
+    request = urllib.request.Request(
+        f"{base_url}/", headers={"X-Forwarded-Proto": "https"}
+    )
+    with urllib.request.urlopen(request, timeout=5) as resp:
+        html = resp.read().decode()
+    canonical = [emitted.url for emitted in emitted_urls(html) if emitted.is_canonical]
+    assert len(canonical) == 1, f"expected one canonical link, found {canonical}"
+    return canonical[0]
+
+
+@pytest.mark.parametrize(
+    ("trusted_ips", "expected_scheme"),
+    [("127.0.0.1", "https"), ("10.0.0.1", "http")],
+)
+def test_image_honors_forwarded_proto_from_trusted_peers_only(
+    trusted_ips: str, expected_scheme: str
+) -> None:
+    """
+    WEBSITE_PROXY_TRUSTED_IPS decides whose X-Forwarded-Proto the image believes.
+
+    Both halves are needed: that the header is honored at all only proves
+    uvicorn's default (which happens to be the loopback this test connects
+    from), so the second case - the same request from a peer the variable does
+    not name - is what proves the variable is wired to the flag rather than
+    ignored. An unbelieved header leaves an HTTPS site advertising an http://
+    canonical link (see "URL generation" in docs/ARCHITECTURE.md).
+    """
+    port = next_test_port()
+    with _running_entrypoint(port, WEBSITE_PROXY_TRUSTED_IPS=trusted_ips) as base_url:
+        canonical = _canonical_link(base_url)
+    assert canonical == f"{expected_scheme}://127.0.0.1:{port}/"
+
+
+def test_image_root_path_comes_from_the_environment_or_the_arguments() -> None:
+    """
+    WEBSITE_ROOT_PATH prefixes generated URLs, and a run-time argument overrides it.
+
+    Uvicorn takes the last occurrence of a repeated option, which is what
+    makes the appended flag win - how a deployment overrides any default this
+    image ships without rebuilding it.
+    """
+    port = next_test_port()
+    with _running_entrypoint(
+        port, "--root-path", "/argument", WEBSITE_ROOT_PATH="/environment"
+    ) as base_url:
+        canonical = _canonical_link(base_url)
+    assert canonical == f"https://127.0.0.1:{port}/argument/"
+
+    port = next_test_port()
+    with _running_entrypoint(port, WEBSITE_ROOT_PATH="/environment") as base_url:
+        canonical = _canonical_link(base_url)
+    assert canonical == f"https://127.0.0.1:{port}/environment/"

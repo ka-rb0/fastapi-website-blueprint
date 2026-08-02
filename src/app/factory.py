@@ -2,17 +2,17 @@
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .config import Settings
 from .exceptions import register_exception_handlers
 from .lifecycle import create_lifespan
 from .middleware import (
     BodySizeLimitMiddleware,
+    HostValidationMiddleware,
     RequestIDMiddleware,
     SecurityHeadersMiddleware,
 )
-from .routers import api_router, create_pages_router
+from .routers import HEALTH_PATH, api_router, create_pages_router
 from .templating import STATIC_DIR, create_templates
 
 APP_TITLE = "FastAPI Website Blueprint"
@@ -42,8 +42,13 @@ def create_app(settings: Settings) -> RequestIDMiddleware:
     fastapi_app.state.settings = settings
     fastapi_app.state.templates = templates
 
+    # The health route is exempt: an orchestrator probes a pod by its own IP,
+    # which no allowlist can name in advance (see HostValidationMiddleware and
+    # "Trusted hosts" in docs/ARCHITECTURE.md).
     fastapi_app.add_middleware(
-        TrustedHostMiddleware, allowed_hosts=list(settings.trusted_hosts)
+        HostValidationMiddleware,
+        allowed_hosts=settings.trusted_hosts,
+        exempt_paths=(HEALTH_PATH,),
     )
     fastapi_app.include_router(create_pages_router(templates))
     fastapi_app.include_router(api_router)

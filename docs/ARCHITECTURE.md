@@ -194,11 +194,32 @@ search engines - so an unlisted `Host` would advertise an
 attacker-chosen address as this site's indexable one.
 `TrustedHostMiddleware` rejects those requests before any template
 renders, and `tests/test_trusted_hosts.py` asserts that the trusted host
-is the only origin a rendered page names. Operational notes
-(the allowlist matches site names, wildcards, keeping `127.0.0.1` for
-the container healthcheck) live in [QUICKSTART.md](QUICKSTART.md).
-Rejected requests get a plain 400 that still carries the security
-headers, because `SecurityHeadersMiddleware` sits outside the framework.
+is the only origin a rendered page names. Operational notes (the
+allowlist matches site names, wildcards) live in
+[QUICKSTART.md](QUICKSTART.md). Rejected requests get a plain 400 that
+still carries the security headers, because `SecurityHeadersMiddleware`
+sits outside the framework.
+
+`HostValidationMiddleware` (`src/app/middleware.py`) is what applies that
+check, and it exempts one path: the health route. A Kubernetes `httpGet`
+probe addresses the pod by the IP it was scheduled with and sends it as
+`Host`, so no allowlist can contain it - a guarded health route means
+every pod fails its own liveness check and restarts forever, on a
+deployment that is otherwise configured correctly. The route can be
+exempt because the invariant above does not reach it: it renders no
+template and reflects nothing of the request, it answers a constant
+`{"status": "ok"}`. Nothing else is exempt, and the comparison is
+deliberately exact (after `root_path` is removed, never normalized) -
+normalizing would _widen_ an exemption, the opposite of the CSP check,
+where it narrows a relaxation. `/api/health/` is the case that shows it:
+the router answers the trailing-slash form with a redirect whose
+`Location` it builds from the `Host` header.
+
+The alternative was to make every deployment configure
+`httpHeaders: [{name: Host, ...}]` on both probes, or list the pod CIDR
+in `WEBSITE_TRUSTED_HOSTS` - a template should not hand its users a
+rediscovery exercise, and the second answer weakens the allowlist that is
+the point of this section.
 
 ## Request body cap (`src/app/middleware.py`, `Settings.max_body_bytes`)
 
@@ -467,6 +488,43 @@ outlive 20s must raise both, in that order.
 `tests/test_graceful_shutdown.py` pins the relationship in both
 directions: that the image's command carries a finite timeout, and that
 uvicorn actually abandons an in-flight request once it expires.
+
+## Distribution image (`.devcontainer/Dockerfile`)
+
+Effectively every production deployment of this app sits behind an
+ingress or a TLS terminator, so the image has to be deployable behind one
+without a command override. Two settings decide whether it is, and both
+are environment variables the entrypoint passes to uvicorn:
+`WEBSITE_ROOT_PATH` (`--root-path`) and `WEBSITE_PROXY_TRUSTED_IPS`
+(`--forwarded-allow-ips`, alongside `--proxy-headers`). They default to
+uvicorn's own behavior - no prefix, loopback only - so a directly exposed
+container is unchanged; left at those defaults behind a proxy, the site
+advertises an `http://` canonical link for an HTTPS deployment, logs the
+proxy's address as every client's, and drops the URL prefix from every
+link it generates (see "URL generation" above).
+
+The names differ from the dev container's `WEBSITE_REVERSE_PROXY_*`
+variables on purpose: those configure the _second_ uvicorn listener that
+the Caddy sidecar talks to, next to a first one that has no proxy at all
+(see [QUICKSTART.md](QUICKSTART.md)). The image serves one listener, and
+names its settings after what they do to it.
+
+The command is an `ENTRYPOINT`, not a `CMD`, so run-time arguments are
+_appended_ to uvicorn's rather than replacing the whole command:
+`docker run <image> --root-path /shop`, or a Kubernetes `args:`, works
+without knowing what the image runs. Uvicorn takes the last occurrence of
+a repeated option, which is what makes an appended flag beat the
+environment default - the same reason the entrypoint ends in `"$@"`.
+Setting `ENTRYPOINT` also clears the `python3` `CMD` inherited from the
+base image, so nothing declares a `CMD` here; `docker run --entrypoint sh`
+is how you run something else.
+
+`tests/test_reverse_proxy_config.py` covers both halves of this, the dev
+topology and the image's, and the image's behaviorally: there is no
+Docker in the dev container, so it runs the entrypoint's own command line
+with the environment defaults the Dockerfile declares, and asserts on
+what the running app then generates. See also "Bounded graceful shutdown"
+above, the third flag the entrypoint passes.
 
 ## Testing strategy (`tests/`)
 

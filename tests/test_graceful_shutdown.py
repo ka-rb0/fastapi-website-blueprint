@@ -16,21 +16,16 @@ uses a short timeout of its own - the mechanism is what is testable in
 seconds, not the image's 20.
 """
 
-import json
 import os
-import re
 import signal
 import socket
 import subprocess
 import time
-from pathlib import Path
 
 import pytest
 
 from .conftest import next_test_port, start_server
-
-REPO_ROOT = Path(__file__).parent.parent
-DOCKERFILE = REPO_ROOT / ".devcontainer" / "Dockerfile"
+from .helpers import distribution_entrypoint, distribution_environment
 
 # Short enough to keep the suite quick, long enough that the exit is
 # unambiguously the timeout expiring rather than a race with startup.
@@ -38,26 +33,17 @@ TIMEOUT_SECONDS = 2
 
 
 def test_distribution_command_bounds_graceful_shutdown() -> None:
-    """The image's CMD passes uvicorn a finite, positive shutdown timeout."""
-    dockerfile = DOCKERFILE.read_text()
-
-    default = re.search(
-        r"^ENV WEBSITE_GRACEFUL_SHUTDOWN_SECONDS=(\d+)$", dockerfile, re.MULTILINE
+    """The image's entrypoint passes uvicorn a finite, positive shutdown timeout."""
+    default = distribution_environment().get("WEBSITE_GRACEFUL_SHUTDOWN_SECONDS", "")
+    assert default.isdigit(), (
+        "the distribution stage declares no shutdown timeout default"
     )
-    assert default, "the distribution stage declares no shutdown timeout default"
-    assert int(default.group(1)) > 0, (
+    assert int(default) > 0, (
         "a zero timeout would abandon in-flight requests instead of draining them"
     )
 
-    cmd = next(
-        (line for line in dockerfile.splitlines() if line.startswith("CMD ")), ""
-    )
-    assert cmd, "the distribution stage has no CMD"
-    # Exec-form CMD is a JSON array; parsing it yields the shell command with
-    # the backslash-escaped quotes resolved, so the assertions below read the
-    # arguments uvicorn actually receives.
-    command = " ".join(json.loads(cmd.removeprefix("CMD ")))
-    assert "uvicorn app.main:app" in command, "the CMD under test moved"
+    command = " ".join(distribution_entrypoint())
+    assert "uvicorn app.main:app" in command, "the entrypoint under test moved"
     assert (
         '--timeout-graceful-shutdown "${WEBSITE_GRACEFUL_SHUTDOWN_SECONDS}"' in command
     ), "without this flag uvicorn waits forever for in-flight requests"

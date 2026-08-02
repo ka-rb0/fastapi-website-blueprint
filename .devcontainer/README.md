@@ -117,8 +117,36 @@ docker run --rm --init \
   fastapi-website-blueprint:distribution
 ```
 
+Behind an ingress or a TLS-terminating proxy, name the site and the proxy:
+
+```bash
+docker run --rm --init \
+  --env WEBSITE_TRUSTED_HOSTS=www.example.com \
+  --env WEBSITE_ROOT_PATH=/shop \
+  --env WEBSITE_PROXY_TRUSTED_IPS=10.0.0.0/8 \
+  --publish 8000:8000 \
+  fastapi-website-blueprint:distribution
+```
+
+Without the last two, the app would advertise an `http://` canonical link for
+an HTTPS site, log the proxy's address as every client's and generate URLs
+that miss the prefix - see "Distribution image" in
+[../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
+
+Any uvicorn flag can be appended instead, since the image's command is an
+`ENTRYPOINT` and uvicorn takes the last occurrence of a repeated option:
+
+```bash
+docker run --rm --init --publish 8000:8000 \
+  fastapi-website-blueprint:distribution --root-path /shop --log-level warning
+```
+
+To run something other than the server, override the entrypoint
+(`docker run --entrypoint sh ...`).
+
 The container runs as an unprivileged user and includes a health check for
-`/api/health`.
+`/api/health`, the one route that answers whatever `Host` a probe sends -
+`WEBSITE_TRUSTED_HOSTS` does not have to name the pod's own address.
 
 ## Published images
 

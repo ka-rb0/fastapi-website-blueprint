@@ -1,6 +1,7 @@
-"""Pure ASGI middleware applied outside FastAPI's framework stack."""
+"""ASGI middleware wrapping FastAPI's stack, plus the host guard inside it."""
 
 import posixpath
+from collections.abc import Iterable
 
 # _utils is private, but get_route_path is the exact function FastAPI's router
 # and StaticFiles use to remove root_path before matching. Importing it from
@@ -9,6 +10,7 @@ import posixpath
 from starlette._utils import get_route_path
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -127,6 +129,46 @@ class SecurityHeadersMiddleware:
             await send(message)
 
         await self.app(scope, receive, send_with_headers)
+
+
+class HostValidationMiddleware:
+    """
+    Enforce the ``Host`` allowlist, except on paths that answer without one.
+
+    Starlette's ``TrustedHostMiddleware`` still does the matching - wildcards,
+    the ``"*"`` opt-out, the 400 - and this wrapper only decides which
+    requests reach it. The exemption exists for orchestrator probes: a
+    Kubernetes ``httpGet`` probe sends the pod's own IP as ``Host``, an
+    address no allowlist can name in advance, so a guarded health route makes
+    every deployment fail its own liveness check and restart forever. A path
+    listed here must therefore answer without ever putting ``Host`` into a
+    response - see "Trusted hosts" in docs/ARCHITECTURE.md.
+
+    Paths are compared exactly, after ``root_path`` is removed and
+    *without* normalizing - the opposite of the CSP check above, because here
+    normalizing would *widen* the exemption rather than narrow a relaxation.
+    ``/api/health/`` normalizes onto the exempt path but is not routed to the
+    health endpoint: the router answers it with a redirect whose ``Location``
+    is built from the very ``Host`` header this guard exists to distrust.
+    """
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        allowed_hosts: Iterable[str],
+        exempt_paths: Iterable[str],
+    ) -> None:
+        """Guard ``app`` with ``allowed_hosts`` on every path but ``exempt_paths``."""
+        self.app = app
+        self.exempt_paths = frozenset(exempt_paths)
+        self.guarded_app = TrustedHostMiddleware(app, allowed_hosts=list(allowed_hosts))
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and get_route_path(scope) in self.exempt_paths:
+            await self.app(scope, receive, send)
+            return
+        await self.guarded_app(scope, receive, send)
 
 
 def _declared_body_length(headers: Headers) -> int | None:

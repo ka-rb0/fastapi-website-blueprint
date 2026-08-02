@@ -44,8 +44,11 @@ uvicorn app.main:app \
   domain serves every visitor, exactly like nginx's `server_name`. The
   default covers local development, and the dev container adds
   `proxy.localhost` for the Caddy topology; a production deployment must set
-  `WEBSITE_TRUSTED_HOSTS` to its public host name(s) and keep `127.0.0.1`
-  in the list for the container healthcheck. Testing from a phone on your
+  `WEBSITE_TRUSTED_HOSTS` to its public host name(s). `/api/health` is the
+  one route exempt from the check, so container healthchecks and Kubernetes
+  probes - which address the pod by an IP no allowlist could name - keep
+  working whatever you set (see "Trusted hosts" in
+  [ARCHITECTURE.md](ARCHITECTURE.md)). Testing from a phone on your
   LAN? The phone addresses the site by this machine's LAN IP, so add that
   IP - not the phone's - or use `"*"` while developing (see
   `.devcontainer/.env.example`).
@@ -80,6 +83,17 @@ uvicorn app.main:app \
   anything downstream that trusts "this request was HTTPS") - if you reuse
   this pattern behind a different reverse proxy, set
   `WEBSITE_REVERSE_PROXY_TRUSTED_IP` to that proxy's real address instead.
+- The distribution image takes the same reverse-proxy settings as the
+  command above, as environment variables: `WEBSITE_ROOT_PATH`
+  (`--root-path`) and `WEBSITE_PROXY_TRUSTED_IPS` (`--forwarded-allow-ips`,
+  with `--proxy-headers` always on). Both default to uvicorn's behavior, so
+  a directly exposed container needs neither, and any uvicorn flag can also
+  be appended at run time - `docker run <image> --root-path /shop`, or a
+  Kubernetes `args:` - because the image's command is an `ENTRYPOINT` and
+  the last occurrence of a repeated option wins. That also means
+  `docker run <image> sh` no longer opens a shell; use
+  `docker run --entrypoint sh <image>`. See "Distribution image" in
+  [ARCHITECTURE.md](ARCHITECTURE.md).
 - The distribution image stops gracefully within
   `WEBSITE_GRACEFUL_SHUTDOWN_SECONDS` (20 by default), which it passes to
   uvicorn as `--timeout-graceful-shutdown`. Uvicorn without that flag waits

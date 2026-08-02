@@ -11,6 +11,7 @@ import pytest
 
 from app.config import Settings
 from app.middleware import DOCS_CSP, SECURITY_HEADERS
+from app.routers import HEALTH_PATH
 from app.schemas import MAX_SHOUT_LENGTH
 
 
@@ -35,7 +36,15 @@ def _post_json_request(url: str, body: bytes) -> urllib.request.Request:
 
 
 def test_health(server: str) -> None:
-    with urllib.request.urlopen(f"{server}/api/health", timeout=5) as resp:
+    """
+    The health route answers - reached through the constant that names it.
+
+    HEALTH_PATH is what the composition root exempts from the Host allowlist
+    (see app.factory), so requesting it here is also what keeps the constant
+    from drifting away from the route it is supposed to name: a stale value
+    would 404 rather than quietly exempt a path nothing serves.
+    """
+    with urllib.request.urlopen(f"{server}{HEALTH_PATH}", timeout=5) as resp:
         assert resp.status == 200
         assert json.load(resp) == {"status": "ok"}
 

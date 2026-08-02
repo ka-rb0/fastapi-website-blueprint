@@ -96,7 +96,7 @@ def start_server(
     inherits this process's streams, so a failing run's output still reaches
     the pytest report.
     """
-    proc = subprocess.Popen(
+    return start_server_command(
         [
             sys.executable,
             "-m",
@@ -108,7 +108,31 @@ def start_server(
             str(port),
             *extra_args,
         ],
-        cwd=SRC_DIR,
+        port,
+        env,
+        output=output,
+    )
+
+
+def start_server_command(
+    argv: list[str],
+    port: int,
+    env: dict[str, str],
+    *,
+    cwd: Path = SRC_DIR,
+    output: IO[bytes] | None = None,
+) -> subprocess.Popen[bytes]:
+    """
+    Run `argv` and return it once it answers /api/health on `port`.
+
+    The argv is a parameter rather than built here so a test can start a
+    server this suite did not compose - the distribution image's entrypoint
+    (tests/test_reverse_proxy_config.py), which has to be run verbatim to be
+    worth testing at all.
+    """
+    proc = subprocess.Popen(
+        argv,
+        cwd=cwd,
         env=env,
         stdout=output,
         stderr=subprocess.STDOUT if output is not None else None,
@@ -150,7 +174,31 @@ def run_server(
     The server is stopped and reaped before the block ends, so an `output`
     file is complete and flushed by the time the caller reads it.
     """
-    proc = start_server(port, env, extra_args, app_target=app_target, output=output)
+    with _serving(
+        start_server(port, env, extra_args, app_target=app_target, output=output), port
+    ) as base_url:
+        yield base_url
+
+
+@contextmanager
+def run_server_command(
+    argv: list[str],
+    port: int,
+    env: dict[str, str],
+    *,
+    cwd: Path = SRC_DIR,
+    output: IO[bytes] | None = None,
+) -> Iterator[str]:
+    """Run `argv` (see start_server_command) and yield its base URL while healthy."""
+    with _serving(
+        start_server_command(argv, port, env, cwd=cwd, output=output), port
+    ) as base_url:
+        yield base_url
+
+
+@contextmanager
+def _serving(proc: subprocess.Popen[bytes], port: int) -> Iterator[str]:
+    """Yield the base URL of an already-healthy `proc`, then stop and reap it."""
     try:
         yield f"http://127.0.0.1:{port}"
     finally:
@@ -209,14 +257,15 @@ def trusted_hosts_server() -> Iterator[str]:
     Start a server with an explicit WEBSITE_TRUSTED_HOSTS allowlist.
 
     site.example stands in for a deployment's public host name (the Host a
-    reverse proxy forwards). 127.0.0.1 stays in the list, exactly as the
-    variable's documentation demands: the readiness poll in start_server
-    probes it, mirroring the distribution image's HEALTHCHECK - dropping it
-    would hang this fixture the same way it would mark that container
-    unhealthy.
+    reverse proxy forwards) and is the whole allowlist - no local name beside
+    it, exactly as a production deployment would set it. The readiness poll
+    in start_server still reaches /api/health over the loopback, because that
+    route is exempt from the allowlist (see HostValidationMiddleware); a
+    regression there fails this fixture with the status the poll got, which
+    is also what would mark the distribution image's HEALTHCHECK unhealthy.
     """
     with run_server(
         next_test_port(),
-        {**os.environ, "WEBSITE_TRUSTED_HOSTS": "127.0.0.1,site.example"},
+        {**os.environ, "WEBSITE_TRUSTED_HOSTS": "site.example"},
     ) as base_url:
         yield base_url

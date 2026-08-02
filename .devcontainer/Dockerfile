@@ -113,7 +113,7 @@ ENV PYTHONPATH=/src
 # it in 8 KB chunks: `docker logs` shows nothing until a chunk fills, and
 # everything still buffered is lost when the process is SIGKILLed (OOM kill,
 # failed liveness probe) - exactly when the last lines matter most. ENV rather
-# than the CMD's `python -u`, so anything else run in the container
+# than a `python -u` in the entrypoint, so anything else run in the container
 # (docker exec, the HEALTHCHECK probe) logs promptly as well.
 ENV PYTHONUNBUFFERED=1
 
@@ -122,11 +122,34 @@ ENV WEBSITE_INTERNAL_PORT=8000
 # Deployments must also set WEBSITE_TRUSTED_HOSTS to the site's public host
 # name(s): the code's default (see Settings.trusted_hosts in
 # src/app/config.py) trusts only local names, so real traffic gets a 400
-# until it is set. Keep 127.0.0.1 in the list - the HEALTHCHECK below
-# probes it.
+# until it is set. The health route is exempt from that check, so the
+# HEALTHCHECK below and an orchestrator's probes keep working whatever the
+# allowlist says (see "Trusted hosts" in docs/ARCHITECTURE.md).
 # EXPOSE is build-time metadata only; a run-time WEBSITE_INTERNAL_PORT
 # override changes the bind port, not this line.
 EXPOSE ${WEBSITE_INTERNAL_PORT}
+
+# Reverse-proxy wiring. Both default to uvicorn's own behavior, so a directly
+# exposed container behaves exactly as before, and both matter as soon as an
+# ingress or TLS terminator sits in front:
+#
+#   WEBSITE_ROOT_PATH          the URL prefix the proxy serves the app under
+#                              and strips before forwarding (e.g. /shop).
+#                              Without it every URL the app generates - the
+#                              canonical link, the shout form's action - omits
+#                              the prefix and points outside the site.
+#   WEBSITE_PROXY_TRUSTED_IPS  comma-separated peers whose X-Forwarded-* this
+#                              app honors. Uvicorn's default trusts only the
+#                              loopback, which is never the proxy in a
+#                              container: until this names the ingress, an
+#                              HTTPS site advertises an http:// canonical link
+#                              and every access line logs the proxy's address
+#                              as the client's (see "URL generation" in
+#                              docs/ARCHITECTURE.md). Set it to the proxy's
+#                              real address or subnet, not "*" - "*" lets any
+#                              client forge both.
+ENV WEBSITE_ROOT_PATH=""
+ENV WEBSITE_PROXY_TRUSTED_IPS=127.0.0.1
 
 # How long uvicorn may spend draining in-flight requests after SIGTERM.
 # uvicorn's own default is *no* limit: it waits for every open connection to
@@ -149,6 +172,16 @@ USER app
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
   CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ['WEBSITE_INTERNAL_PORT'] + '/api/health', timeout=4)"
 
-# Shell form allows WEBSITE_INTERNAL_PORT and the shutdown timeout to resolve
-# at run time; exec makes uvicorn PID 1, so it receives the stop signal itself.
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port \"${WEBSITE_INTERNAL_PORT}\" --timeout-graceful-shutdown \"${WEBSITE_GRACEFUL_SHUTDOWN_SECONDS}\""]
+# ENTRYPOINT rather than CMD, so `docker run <image> --root-path /shop` (or a
+# Kubernetes `args:`) *appends* uvicorn flags instead of replacing the whole
+# command - the last occurrence of a repeated option wins, so any of the
+# defaults above can be overridden per deployment without rebuilding. Setting
+# ENTRYPOINT also clears the `python3` CMD inherited from the base image, and
+# nothing here declares a CMD of its own: the arguments are the deployment's.
+# Run something else with `docker run --entrypoint sh <image>`.
+#
+# `sh -c` resolves the environment variables at run time - a plain exec-form
+# command would pass them through as literals - and `exec` makes uvicorn PID 1,
+# so it receives the stop signal itself. In `sh -c <script> <arg0> <args...>`
+# the first argument fills $0, hence the `--` placeholder ahead of "$@".
+ENTRYPOINT ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port \"${WEBSITE_INTERNAL_PORT}\" --timeout-graceful-shutdown \"${WEBSITE_GRACEFUL_SHUTDOWN_SECONDS}\" --root-path \"${WEBSITE_ROOT_PATH}\" --proxy-headers --forwarded-allow-ips \"${WEBSITE_PROXY_TRUSTED_IPS}\" \"$@\"", "--"]

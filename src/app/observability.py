@@ -51,10 +51,14 @@ def bind_request_id(candidate: str | None) -> Iterator[str]:
 
     A context variable, not a request attribute, so code that never sees the
     request - a logger deep in a call stack, a helper module - still emits the
-    ID. It is reset on the way out: each ASGI request runs in its own task and
-    therefore its own context, but that is the server's guarantee, not this
-    app's, and an app embedded in someone else's task must not leak an ID into
-    whatever runs next.
+    ID. On a clean exit it is reset on the way out: each ASGI request runs in
+    its own task and therefore its own context, but that is the server's
+    guarantee, not this app's, and an app embedded in someone else's task must
+    not leak an ID into whatever runs next. When an exception is unwinding,
+    the binding is deliberately left in place - the server catches the
+    exception *above* this block and only then logs the traceback, the one
+    record the ID exists for (see "Request correlation" in
+    docs/ARCHITECTURE.md).
     """
     request_id = (
         candidate
@@ -62,10 +66,15 @@ def bind_request_id(candidate: str | None) -> Iterator[str]:
         else uuid.uuid4().hex
     )
     token = _request_id.set(request_id)
-    try:
-        yield request_id
-    finally:
-        _request_id.reset(token)
+    yield request_id
+    # Deliberately not in a finally: an exception unwinding through the yield
+    # skips this reset, because uvicorn logs "Exception in ASGI application"
+    # after this block has unwound and that record must carry this ID. The
+    # context is per-request under any ASGI server, so the retained binding
+    # dies with the request's task; the embedded-host leak the reset guards
+    # against is confined to the exception path, where the host's own error
+    # logging is exactly what benefits from the retained ID.
+    _request_id.reset(token)
 
 
 class RequestIDFilter(logging.Filter):

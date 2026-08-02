@@ -242,10 +242,27 @@ reporter can read the ID straight off the response without log access.
 
 A context variable rather than something hung on the request, because
 the code that logs is usually the code that never sees a request object:
-a helper three calls down, a library logger. It is reset on the way out
-of the middleware - each ASGI request already runs in its own context,
-but that is the server's guarantee, not this app's, and an app embedded
-in someone else's task must not leak an ID into whatever runs next.
+a helper three calls down, a library logger. On a clean exit it is reset
+on the way out of the middleware - each ASGI request already runs in its
+own context, but that is the server's guarantee, not this app's, and an
+app embedded in someone else's task must not leak an ID into whatever
+runs next.
+
+**When an exception is unwinding, the binding is deliberately kept.**
+Uvicorn catches an unhandled exception _above_ this middleware and only
+then logs the traceback ("Exception in ASGI application") - the one
+record an operator most wants to find by ID, and the reason resetting in
+a `finally` would be wrong: the reset would run mid-unwind, before
+uvicorn logs, and file the traceback under `-`. The retained binding
+still dies with the request's context under any ASGI server; the leak
+the reset guards against is confined to an embedded host's exception
+path, where that host's own error logging is exactly what benefits from
+the retained ID. `tests/test_request_id.py` pins both halves: reset
+after a clean response, kept where the server's error logger runs.
+
+Only `http` scopes are correlated. A WebSocket connection passes through
+the middleware untouched, so adding WebSocket routes means extending it -
+and deciding what one ID should span for a long-lived connection.
 
 Outermost in the stack (see "Composition root"), so responses produced
 without an endpoint ever running - a body-cap 413, a rejected `Host`, an
@@ -283,7 +300,10 @@ process with a single handler on stdout: one formatter, so the ID is
 everywhere, and one stream, so app and access lines cannot interleave
 out of order the way two buffered ones do. Their levels become `NOTSET`
 so they inherit the root level, which makes `LOG_LEVEL` mean what it
-says instead of losing to uvicorn's hardcoded INFO.
+says instead of losing to uvicorn's hardcoded INFO. That one knob cuts
+both ways: access lines are INFO, so `LOG_LEVEL=WARNING` quiets the
+per-request line along with the app - deliberate, but worth knowing
+before turning the level down in an incident.
 
 That happens in the lifespan handler, which runs _after_ uvicorn has
 configured logging - the ordering is what lets the app replace it, and

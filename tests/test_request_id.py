@@ -147,13 +147,36 @@ def test_a_rejected_host_is_correlated(server: str) -> None:
     assert MINTED_ID.fullmatch(_request_id_of(server, host="attacker.example"))
 
 
+def test_a_body_cap_413_is_correlated(server: str) -> None:
+    """
+    The body guard's pre-routing 413 carries an ID.
+
+    That 413 is sent by hand from BodySizeLimitMiddleware before any
+    framework code sees the request, which makes it the other wrapper-order
+    proof: correlation must sit outside the body guard, or the response
+    naming the oversized request would be the one nobody can find.
+    """
+    request = urllib.request.Request(
+        f"{server}/api/shout", data=b"x" * 1_000_001, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5):
+            raise AssertionError("an over-cap body should have been refused")
+    except urllib.error.HTTPError as error:
+        with error:
+            assert error.code == 413
+            assert MINTED_ID.fullmatch(str(error.headers[REQUEST_ID_HEADER]))
+
+
 def test_the_id_does_not_outlive_the_request() -> None:
     """
-    The ID is unset again once the response is done.
+    The ID is unset again once the response is done cleanly.
 
     Each ASGI request runs in its own context, so a leak is invisible under a
     real server - until the app is embedded somewhere that reuses a task, and
-    a background job starts logging under the last visitor's ID.
+    a background job starts logging under the last visitor's ID. The clean
+    path only: an exception deliberately keeps the binding, and the test
+    below pins down why.
 
     Driven inside one coroutine on purpose: awaiting the middleware directly
     keeps it in this context, where a missing reset would show. Handing it to
@@ -183,6 +206,40 @@ def test_the_id_does_not_outlive_the_request() -> None:
     after = asyncio.run(drive())
     assert MINTED_ID.fullmatch(seen_inside), "no ID reached the wrapped app"
     assert after == NO_REQUEST_ID
+
+
+def test_an_unhandled_exception_is_logged_under_the_request_id() -> None:
+    """
+    The binding survives an exception unwinding through the middleware.
+
+    Uvicorn catches an unhandled exception *above* this middleware and only
+    then logs the traceback ("Exception in ASGI application") - the record
+    an operator most wants to find by ID. Resetting the ContextVar while the
+    exception unwinds would file that traceback under `-`, so the reset is
+    the clean path's alone; this asserts the ID is still bound where the
+    server's error logger runs, i.e. after the middleware call has raised.
+    """
+
+    async def inner(scope: Scope, receive: Receive, send: Send) -> None:
+        raise RuntimeError("kaboom")
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: Message) -> None:
+        pass
+
+    scope: Scope = {"type": "http", "method": "GET", "path": "/", "headers": []}
+
+    async def drive() -> str:
+        try:
+            await RequestIDMiddleware(inner)(scope, receive, send)
+        except RuntimeError:
+            # Where uvicorn's "Exception in ASGI application" record is made.
+            return get_request_id()
+        raise AssertionError("the exception should have propagated")
+
+    assert MINTED_ID.fullmatch(asyncio.run(drive()))
 
 
 def test_the_log_stream_carries_the_id_of_the_request_it_describes(

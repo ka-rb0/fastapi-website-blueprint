@@ -63,7 +63,8 @@ uvicorn app.main:app \
   have your gateway send it) and the app keeps your value, as long as it is
   1-64 visible ASCII characters; anything else is replaced with a fresh one
   rather than refused. Lines with no request behind them (startup, shutdown)
-  show `[-]`. `LOG_LEVEL` sets the level for the app and uvicorn alike.
+  show `[-]`. `LOG_LEVEL` sets the level for the app and uvicorn alike -
+  access lines are INFO, so `WARNING` and up silences them too.
 - `--forwarded-allow-ips="$WEBSITE_REVERSE_PROXY_TRUSTED_IP"` defaults to
   Caddy's pinned Compose-network address (see `docker-compose.yml`), not
   `*`: uvicorn only honors X-Forwarded-For/X-Forwarded-Proto from that one

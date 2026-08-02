@@ -169,6 +169,31 @@ ENV UVICORN_FORWARDED_ALLOW_IPS=127.0.0.1
 # when to give up; raise both together for long-running requests.
 ENV UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN=20
 
+# Backpressure. Uvicorn's default is *no* limit, so a burst of traffic is
+# accepted in full and the process grows until the kernel OOM-kills it - the
+# whole replica dies, in-flight requests included, instead of the excess being
+# turned away. Past this number uvicorn answers 503 straight from the protocol
+# layer, before the application is reached: a load balancer can retry that
+# elsewhere, and the replica keeps serving what it already accepted.
+#
+# The number bounds *connections*, not requests in flight: uvicorn compares it
+# against the open-connection count and the task count, whichever is larger,
+# so an idle keep-alive connection occupies a slot just as much as a running
+# request does (uvicorn/protocols/http/h11_impl.py). Size it against peak
+# concurrent connections, therefore - a browser opens several per origin, so
+# 512 is roughly 85 simultaneous visitors per replica, not 512. Idle slots come
+# back after --timeout-keep-alive (5s by default). Set it too low and ordinary
+# traffic gets 503s, so raise it (or add replicas) rather than trimming it to
+# the request rate.
+ENV UVICORN_LIMIT_CONCURRENCY=512
+
+# Don't advertise the server software. Uvicorn sends `Server: uvicorn` by
+# default, which hands a scanner the stack to look up known issues for and
+# gains a deployment nothing in return - the same reasoning that shapes the
+# response headers in src/app/middleware.py. The `Date` header stays on: HTTP
+# caches need it, and it identifies nothing.
+ENV UVICORN_SERVER_HEADER=false
+
 # Nothing needs root at run time: uvicorn binds a high port and the code is
 # read-only, so drop to an unprivileged user.
 RUN useradd --system --no-create-home app

@@ -102,6 +102,19 @@ image; no second command is needed.
   (`terminationGracePeriodSeconds` in Kubernetes, `docker stop --time`
   elsewhere), and raise the grace period first if your requests need longer
   - see [ARCHITECTURE.md](ARCHITECTURE.md).
+- The image caps what it accepts at `UVICORN_LIMIT_CONCURRENCY` (512 by
+  default) and answers 503 above it, rather than accepting a burst until the
+  container is OOM-killed. The number counts **connections, not requests in
+  flight** - an idle keep-alive connection holds a slot, and a browser opens
+  several per origin, so 512 is on the order of 85 simultaneous visitors per
+  replica. Tune it against peak concurrent connections; if ordinary traffic
+  starts seeing 503s, raise it or add replicas.
+- Responses carry no `Server` header (`UVICORN_SERVER_HEADER=false`): naming
+  the stack only helps someone matching the deployment against known issues.
+- Compression belongs to the reverse proxy, like HSTS - it is CPU-bound work
+  that would otherwise run on uvicorn's event loop. The Caddy sidecar sets
+  `encode zstd gzip`; configure your production ingress to do the same,
+  because **a directly exposed container serves everything uncompressed**.
 - To preview different screen sizes, press `Ctrl+Shift+M` in the browser's
   developer tools
 

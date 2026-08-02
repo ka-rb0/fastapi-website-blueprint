@@ -3,7 +3,7 @@
 # instead of trusting the whole network with "*". One literal, referenced
 # from both the network's static assignment and the proxy backend's native
 # Uvicorn configuration below, so the two can't drift apart.
-x-caddy-ip: &caddy_ip 172.28.238.2
+x-caddy-ip: &caddy_ip 172.28.238.6
 
 x-development-build: &development_build
   context: ..

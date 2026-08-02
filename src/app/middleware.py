@@ -129,6 +129,17 @@ class SecurityHeadersMiddleware:
         await self.app(scope, receive, send_with_headers)
 
 
+def _declared_body_length(headers: Headers) -> int | None:
+    """Return the declared ``Content-Length``, or ``None`` if there is no usable one."""
+    declared = headers.get("content-length")
+    # RFC 9110 spells Content-Length `1*DIGIT`. Matching that exactly, rather
+    # than deferring to int(), which also accepts "+1", " 1 " and "1_000" -
+    # forms no HTTP parser produces and none of which should be read as a size.
+    if declared is None or not (declared.isascii() and declared.isdigit()):
+        return None
+    return int(declared)
+
+
 class BodySizeLimitMiddleware:
     """
     Reject request bodies that exceed an application-level byte limit.
@@ -156,9 +167,12 @@ class BodySizeLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Uvicorn's HTTP parser has already validated Content-Length as an int.
-        declared = Headers(scope=scope).get("content-length")
-        if declared is not None and int(declared) > self.max_body_bytes:
+        # None when the request declares no length *or* declares one that is
+        # not a size - framing is the server's job, the cap is this wrapper's,
+        # and the streaming counter below enforces it on whatever actually
+        # arrives either way. See "Request body cap" in docs/ARCHITECTURE.md.
+        declared = _declared_body_length(Headers(scope=scope))
+        if declared is not None and declared > self.max_body_bytes:
             # Hand-rolled, so the {"detail": ...} shape must mirror FastAPI's
             # error responses by convention - tests/test_api.py asserts it.
             response = JSONResponse(

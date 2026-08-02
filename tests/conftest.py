@@ -7,6 +7,7 @@ $WEBSITE_INTERNAL_PORT can stay up. No httpx / TestClient dependency - API tests
 hit the live servers with urllib.
 """
 
+import itertools
 import os
 import signal
 import subprocess
@@ -23,13 +24,13 @@ import pytest
 
 SRC_DIR = Path(__file__).parent.parent / "src"
 # The inclusive port range every live server in the suite draws from, one
-# consecutive port each (allocated through allocate_test_port) - the session
+# consecutive port each (allocated through next_test_port) - the session
 # fixtures below plus the servers individual tests start for themselves.
 # Factory-only configuration variants need no server - and no port.
 PORT_MIN = int(os.environ.get("WEBSITE_TEST_PORT_MIN", "11120"))
 PORT_MAX = int(os.environ.get("WEBSITE_TEST_PORT_MAX", "11199"))
 if PORT_MIN > PORT_MAX:
-    # Caught here rather than in allocate_test_port, where an inverted range would
+    # Caught here rather than in next_test_port, where an inverted range would
     # surface as the "widen the range" error below - misleading advice when
     # the range is not too narrow but backwards.
     raise RuntimeError(
@@ -37,11 +38,24 @@ if PORT_MIN > PORT_MAX:
         f" ({PORT_MIN}..{PORT_MAX}) - MIN must not be greater than MAX"
     )
 
+_ports = itertools.count(PORT_MIN)
 
-def allocate_test_port(offset: int) -> int:
-    """Return the offset-th port of the configured range, refusing to leave it."""
-    port = PORT_MIN + offset
-    if not PORT_MIN <= port <= PORT_MAX:
+
+def next_test_port() -> int:
+    """
+    Hand out the next unused port of the configured range.
+
+    A counter rather than a per-caller offset: an offset has to be unique
+    across every module that starts a server, which nothing checks, and a
+    duplicate would surface as the readiness poll timing out - a startup
+    error for what is really a bookkeeping mistake. Callers just ask.
+
+    The consequence is that a port belongs to a run, not to a fixture: which
+    server lands on which port depends on the order pytest reaches them, so
+    read the port off the fixture when debugging rather than assuming one.
+    """
+    port = next(_ports)
+    if port > PORT_MAX:
         raise RuntimeError(
             f"test server port {port} is outside the configured"
             f" WEBSITE_TEST_PORT_MIN..WEBSITE_TEST_PORT_MAX range"
@@ -161,16 +175,14 @@ def server() -> Iterator[str]:
     # code's default, not whatever the shell carries (the dev container's
     # compose environment sets the variable).
     env = {k: v for k, v in os.environ.items() if k != "WEBSITE_TRUSTED_HOSTS"}
-    with run_server(
-        allocate_test_port(0), {**env, "WEBSITE_ENABLE_DOCS": "1"}
-    ) as base_url:
+    with run_server(next_test_port(), {**env, "WEBSITE_ENABLE_DOCS": "1"}) as base_url:
         yield base_url
 
 
 @pytest.fixture(scope="session")
 def prefixed_server() -> Iterator[str]:
     """
-    Start a server deployed under the URL prefix /prefix, one port up.
+    Start a server deployed under the URL prefix /prefix.
 
     --root-path is uvicorn's stand-in for a reverse proxy that mounts the app
     at /prefix and strips the prefix before forwarding: requests arrive at
@@ -184,7 +196,7 @@ def prefixed_server() -> Iterator[str]:
     tests/test_url_prefix.py.
     """
     with run_server(
-        allocate_test_port(1),
+        next_test_port(),
         {**os.environ, "WEBSITE_ENABLE_DOCS": "1"},
         ("--root-path", "/prefix"),
     ) as base_url:
@@ -194,7 +206,7 @@ def prefixed_server() -> Iterator[str]:
 @pytest.fixture(scope="session")
 def trusted_hosts_server() -> Iterator[str]:
     """
-    Start a server with an explicit WEBSITE_TRUSTED_HOSTS allowlist, two ports up.
+    Start a server with an explicit WEBSITE_TRUSTED_HOSTS allowlist.
 
     site.example stands in for a deployment's public host name (the Host a
     reverse proxy forwards). 127.0.0.1 stays in the list, exactly as the
@@ -204,7 +216,7 @@ def trusted_hosts_server() -> Iterator[str]:
     unhealthy.
     """
     with run_server(
-        allocate_test_port(2),
+        next_test_port(),
         {**os.environ, "WEBSITE_TRUSTED_HOSTS": "127.0.0.1,site.example"},
     ) as base_url:
         yield base_url

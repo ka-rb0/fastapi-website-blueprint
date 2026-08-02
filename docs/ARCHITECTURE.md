@@ -209,11 +209,22 @@ could stream an arbitrarily large request into memory. The default,
 10^6 bytes, is the same count Caddy's `1MB` means in
 `.devcontainer/Caddyfile`, which mirrors the cap at the dev proxy.
 
-An oversized declared `Content-Length` is rejected before routing
-(`int()` without try/except - uvicorn's parser already rejected
-non-integer values), so the cap also covers endpoints and error paths
-that never read the body. Chunked or lying uploads are counted as the
-app consumes them and cut off at the first byte past the limit. A
+An oversized declared `Content-Length` is rejected before routing, so
+the cap also covers endpoints and error paths that never read the body.
+Chunked or lying uploads are counted as the app consumes them and cut
+off at the first byte past the limit.
+
+The declaration is read against RFC 9110's `1*DIGIT` rather than handed
+to `int()`, which also accepts `+1`, `1` and `1_000` (silently 1000) -
+forms no HTTP parser produces and none that should be read as a size.
+Anything that does not match is treated as _no_ declaration rather than
+as an error: HTTP framing is the server's job - uvicorn answers such a
+request with a 400 before this app is ever called - while the cap is
+this wrapper's, and the streaming counter enforces it on whatever bytes
+arrive regardless. Raising instead would put a `ValueError` through the
+whole stack of an embedding host whose parser is laxer than uvicorn's,
+and it would escape _outside_ `ServerErrorMiddleware` (which sits inside
+this wrapper), so the client would get no response at all rather than a 500. A
 proxy-level cap is still required to reject an oversized chunked body
 when the selected route never consumes it; the in-app guard is what
 protects a directly exposed container - the distribution image runs

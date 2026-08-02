@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from .conftest import allocate_test_port, start_server
+from .conftest import next_test_port, start_server
 
 REPO_ROOT = Path(__file__).parent.parent
 DOCKERFILE = REPO_ROOT / ".devcontainer" / "Dockerfile"
@@ -65,7 +65,7 @@ def test_distribution_command_bounds_graceful_shutdown() -> None:
 
 def test_shutdown_ends_even_with_a_request_in_flight() -> None:
     """A request that never completes cannot outlast the configured timeout."""
-    port = allocate_test_port(3)
+    port = next_test_port()
     proc = start_server(
         port,
         dict(os.environ),

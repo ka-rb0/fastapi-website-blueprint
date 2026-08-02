@@ -424,7 +424,12 @@ isolation never covered.
 What the lifespan does own is the startup echo: the settings the
 instance actually booted with, logged once. `app.config` refuses to
 boot on invalid settings, and that strictness is only auditable if the
-configuration that survived is visible in the log.
+configuration that survived is visible in the log. The one value the
+echo counts rather than names is the trusted-host allowlist: it can
+carry internal hostnames, and a log line outlives the process that
+wrote it (aggregators, bug reports, support tickets), so the echo
+answers "how many hosts survived validation" and leaves "which ones" to
+the deployment's own configuration.
 
 ### Bounded graceful shutdown (`.devcontainer/Dockerfile`)
 

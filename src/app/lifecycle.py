@@ -32,10 +32,16 @@ def create_lifespan(
         logger.info("Serving static files from %s", STATIC_DIR)
         # Echo the surviving configuration once: app.config refuses to boot on
         # invalid settings, and that strictness is only auditable if what an
-        # instance actually booted with is visible in its log.
+        # instance actually booted with is visible in its log. The host
+        # allowlist is counted, not named: it is the one setting here whose
+        # value can carry internal hostnames, and logs travel further than the
+        # deployment does (aggregators, bug reports, support tickets). The
+        # count still shows an empty-vs-default-vs-configured allowlist, which
+        # is what the echo is for. CodeQL flags the named form as clear-text
+        # logging of a secret for the same reason.
         logger.info(
-            "Trusted hosts: %s; docs %s; request bodies capped at %d bytes",
-            ", ".join(settings.trusted_hosts),
+            "Trusted hosts: %d configured; docs %s; request bodies capped at %d bytes",
+            len(settings.trusted_hosts),
             "enabled" if settings.docs_enabled else "disabled",
             settings.max_body_bytes,
         )

@@ -15,7 +15,7 @@
     keeps the root-path-prefixed URL (/prefix/css/style.css) and drops the
     scheme and host. Those come from the request, and behind a
     TLS-terminating proxy they are only right when uvicorn was told which
-    proxy to trust (--forwarded-allow-ips, default 127.0.0.1 - never the
+    proxy to trust (UVICORN_FORWARDED_ALLOW_IPS, default 127.0.0.1 - never the
     proxy in a container). When they are wrong, every asset URL is http:// on
     an https:// page, which our own CSP (style-src 'self') blocks as
     cross-origin: the site renders unstyled, with a dead theme switch and a

@@ -1,24 +1,22 @@
 """
 Guards for the distribution image's bounded graceful shutdown.
 
-Uvicorn's own `--timeout-graceful-shutdown` default is *no* limit: after
+Uvicorn's own graceful-shutdown default is *no* limit: after
 SIGTERM it waits for every in-flight request, however long that takes. Under
 an orchestrator that turns a rolling deploy into a stall - the replica hangs
 until the termination grace period expires and SIGKILL cuts the connections
 mid-response, which is the opposite of draining them. The distribution image
-therefore passes an explicit timeout (see "Bounded graceful shutdown" in
+therefore configures an explicit timeout (see "Bounded graceful shutdown" in
 docs/ARCHITECTURE.md).
 
 Two halves, because neither proves the behavior alone: that the image's
-command still carries a finite timeout, and that a finite timeout really does
-end a shutdown a stuck request would otherwise hold open. The behavioral half
-uses a short timeout of its own - the mechanism is what is testable in
+environment still carries a finite timeout, and that a finite timeout really
+does end a shutdown a stuck request would otherwise hold open. The behavioral
+half uses a short timeout of its own - the mechanism is what is testable in
 seconds, not the image's 20.
 """
 
-import json
 import os
-import re
 import signal
 import socket
 import subprocess
@@ -27,49 +25,44 @@ from pathlib import Path
 
 import pytest
 
-from .conftest import allocate_test_port, start_server
-
-REPO_ROOT = Path(__file__).parent.parent
-DOCKERFILE = REPO_ROOT / ".devcontainer" / "Dockerfile"
+from .conftest import SRC_DIR, next_test_port, start_server_command
+from .helpers import distribution_entrypoint, distribution_environment
 
 # Short enough to keep the suite quick, long enough that the exit is
 # unambiguously the timeout expiring rather than a race with startup.
 TIMEOUT_SECONDS = 2
+REPO_ROOT = Path(__file__).parent.parent
 
 
 def test_distribution_command_bounds_graceful_shutdown() -> None:
-    """The image's CMD passes uvicorn a finite, positive shutdown timeout."""
-    dockerfile = DOCKERFILE.read_text()
-
-    default = re.search(
-        r"^ENV WEBSITE_GRACEFUL_SHUTDOWN_SECONDS=(\d+)$", dockerfile, re.MULTILINE
+    """The image configures Uvicorn with a finite, positive shutdown timeout."""
+    default = distribution_environment().get("UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN", "")
+    assert default.isdigit(), (
+        "the distribution stage declares no shutdown timeout default"
     )
-    assert default, "the distribution stage declares no shutdown timeout default"
-    assert int(default.group(1)) > 0, (
+    assert int(default) > 0, (
         "a zero timeout would abandon in-flight requests instead of draining them"
     )
 
-    cmd = next(
-        (line for line in dockerfile.splitlines() if line.startswith("CMD ")), ""
-    )
-    assert cmd, "the distribution stage has no CMD"
-    # Exec-form CMD is a JSON array; parsing it yields the shell command with
-    # the backslash-escaped quotes resolved, so the assertions below read the
-    # arguments uvicorn actually receives.
-    command = " ".join(json.loads(cmd.removeprefix("CMD ")))
-    assert "uvicorn app.main:app" in command, "the CMD under test moved"
-    assert (
-        '--timeout-graceful-shutdown "${WEBSITE_GRACEFUL_SHUTDOWN_SECONDS}"' in command
-    ), "without this flag uvicorn waits forever for in-flight requests"
+    assert distribution_entrypoint() == ["uvicorn", "app.main:app"]
 
 
 def test_shutdown_ends_even_with_a_request_in_flight() -> None:
     """A request that never completes cannot outlast the configured timeout."""
-    port = allocate_test_port(3)
-    proc = start_server(
+    port = next_test_port()
+    environment = {
+        **distribution_environment(),
+        "PATH": os.environ["PATH"],
+        "PYTHONPATH": str(SRC_DIR),
+        "UVICORN_HOST": "127.0.0.1",
+        "UVICORN_PORT": str(port),
+        "UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN": str(TIMEOUT_SECONDS),
+    }
+    proc = start_server_command(
+        distribution_entrypoint(),
         port,
-        dict(os.environ),
-        ("--timeout-graceful-shutdown", str(TIMEOUT_SECONDS)),
+        environment,
+        cwd=REPO_ROOT,
     )
     stuck = socket.create_connection(("127.0.0.1", port), timeout=5)
     try:

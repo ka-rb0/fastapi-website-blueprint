@@ -46,28 +46,31 @@ including the expensive development tools and browser installation.
 
 ## Dev container
 
-Docker Compose builds the `agent` target automatically. Opening an existing
-Dev Container starts or attaches to its existing container; it does not run a
-fresh image build. An explicit rebuild evaluates the Dockerfile but reuses
-unchanged BuildKit cache layers.
+Docker Compose builds the `agent` target for `master` and the smaller `dev`
+target for the proxy backend. `agent` already builds through `dev`, so their
+layers are shared. Opening an existing Dev Container starts or attaches to its
+existing containers; it does not run a fresh image build. An explicit rebuild
+evaluates the Dockerfile but reuses unchanged BuildKit cache layers.
 
 The application source is bind-mounted at `/workspace`, and Compose sets
 `PYTHONPATH=/workspace/src`.
 
 ## Development reverse proxy
 
-The Compose environment also starts a Caddy container. It is a
-development sidecar, not part of the image build graph or the distribution
-image:
+Compose starts Caddy and a dedicated reload-enabled Uvicorn backend for it.
+They are development services, not part of the image build graph or the
+distribution image. The backend uses the same native `UVICORN_*` settings as
+the distribution image; keeping it separate prevents its URL prefix from
+affecting direct development and test processes in `master`:
 
 ```text
 http://localhost:$WEBSITE_EXTERNAL_PORT
-  └──→ master:$WEBSITE_INTERNAL_PORT
+  └──→ master:$UVICORN_PORT
 
-https://proxy.localhost:$WEBSITE_EXTERNAL_HTTPS_PORT_WITH_REVERSE_PROXY
+https://proxy.localhost:$WEBSITE_PROXY_HTTPS_PORT
   └──→ Caddy
-       └── strips $WEBSITE_REVERSE_PROXY_ROOT_PATH
-           └──→ master:$WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY
+       └── strips $UVICORN_ROOT_PATH
+           └──→ proxy-backend:$WEBSITE_PROXY_BACKEND_PORT
 ```
 
 ## Refresh the agent CLIs
@@ -112,13 +115,43 @@ To use a different port:
 
 ```bash
 docker run --rm --init \
-  --env WEBSITE_INTERNAL_PORT=11111 \
+  --env UVICORN_PORT=11111 \
   --publish 11111:11111 \
   fastapi-website-blueprint:distribution
 ```
 
+Behind an ingress or a TLS-terminating proxy, name the site and the proxy:
+
+```bash
+docker run --rm --init \
+  --env WEBSITE_TRUSTED_HOSTS=www.example.com \
+  --env UVICORN_ROOT_PATH=/shop \
+  --env UVICORN_PROXY_HEADERS=true \
+  --env UVICORN_FORWARDED_ALLOW_IPS=10.0.0.0/8 \
+  --publish 8000:8000 \
+  fastapi-website-blueprint:distribution
+```
+
+Without the last two, the app would advertise an `http://` canonical link for
+an HTTPS site, log the proxy's address as every client's and generate URLs
+that miss the prefix - see "Distribution image" in
+[../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
+
+Any Uvicorn flag can be appended instead. The image's exec-form `ENTRYPOINT`
+is Uvicorn itself, and command-line values take precedence over `UVICORN_*`
+environment values:
+
+```bash
+docker run --rm --init --publish 8000:8000 \
+  fastapi-website-blueprint:distribution --root-path /shop --log-level warning
+```
+
+To run something other than the server, override the entrypoint
+(`docker run --entrypoint sh ...`).
+
 The container runs as an unprivileged user and includes a health check for
-`/api/health`.
+`/api/health`, the one route that answers whatever `Host` a probe sends -
+`WEBSITE_TRUSTED_HOSTS` does not have to name the pod's own address.
 
 ## Published images
 

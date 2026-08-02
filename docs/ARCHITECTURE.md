@@ -150,8 +150,8 @@ own public address:
 
 Keeping the origin here makes the page depend on the app reconstructing
 it from the request, which behind a TLS-terminating proxy means
-uvicorn's `X-Forwarded-Proto` handling - and uvicorn honors that header
-only from peers listed in `--forwarded-allow-ips`, which defaults to
+Uvicorn's `X-Forwarded-Proto` handling - and Uvicorn honors that header
+only from peers listed in `UVICORN_FORWARDED_ALLOW_IPS`, which defaults to
 `127.0.0.1` and is therefore never the proxy in a container. A wrong
 reconstruction emits every asset URL as `http://` on an `https://` page,
 where the app's **own** CSP (`style-src 'self'`) blocks it as
@@ -170,7 +170,7 @@ with a bare `url_for`:
 A crawler needs the single address to index, and `/` is a different page
 on every host that serves it, so this URL has to carry the scheme and
 host. That makes it the one place the proxy-header configuration is
-load-bearing: a deployment that does not set `--forwarded-allow-ips`
+load-bearing: a deployment that does not set `UVICORN_FORWARDED_ALLOW_IPS`
 advertises an `http://` canonical for an HTTPS site. The failure is a
 wrong hint to search engines rather than a broken page, which is why
 this is the right - and only - URL to spend it on. The 404 page carries
@@ -194,11 +194,32 @@ search engines - so an unlisted `Host` would advertise an
 attacker-chosen address as this site's indexable one.
 `TrustedHostMiddleware` rejects those requests before any template
 renders, and `tests/test_trusted_hosts.py` asserts that the trusted host
-is the only origin a rendered page names. Operational notes
-(the allowlist matches site names, wildcards, keeping `127.0.0.1` for
-the container healthcheck) live in [QUICKSTART.md](QUICKSTART.md).
-Rejected requests get a plain 400 that still carries the security
-headers, because `SecurityHeadersMiddleware` sits outside the framework.
+is the only origin a rendered page names. Operational notes (the
+allowlist matches site names, wildcards) live in
+[QUICKSTART.md](QUICKSTART.md). Rejected requests get a plain 400 that
+still carries the security headers, because `SecurityHeadersMiddleware`
+sits outside the framework.
+
+`HostValidationMiddleware` (`src/app/middleware.py`) is what applies that
+check, and it exempts one path: the health route. A Kubernetes `httpGet`
+probe addresses the pod by the IP it was scheduled with and sends it as
+`Host`, so no allowlist can contain it - a guarded health route means
+every pod fails its own liveness check and restarts forever, on a
+deployment that is otherwise configured correctly. The route can be
+exempt because the invariant above does not reach it: it renders no
+template and reflects nothing of the request, it answers a constant
+`{"status": "ok"}`. Nothing else is exempt, and the comparison is
+deliberately exact (after `root_path` is removed, never normalized) -
+normalizing would _widen_ an exemption, the opposite of the CSP check,
+where it narrows a relaxation. `/api/health/` is the case that shows it:
+the router answers the trailing-slash form with a redirect whose
+`Location` it builds from the `Host` header.
+
+The alternative was to make every deployment configure
+`httpHeaders: [{name: Host, ...}]` on both probes, or list the pod CIDR
+in `WEBSITE_TRUSTED_HOSTS` - a template should not hand its users a
+rediscovery exercise, and the second answer weakens the allowlist that is
+the point of this section.
 
 ## Request body cap (`src/app/middleware.py`, `Settings.max_body_bytes`)
 
@@ -209,11 +230,22 @@ could stream an arbitrarily large request into memory. The default,
 10^6 bytes, is the same count Caddy's `1MB` means in
 `.devcontainer/Caddyfile`, which mirrors the cap at the dev proxy.
 
-An oversized declared `Content-Length` is rejected before routing
-(`int()` without try/except - uvicorn's parser already rejected
-non-integer values), so the cap also covers endpoints and error paths
-that never read the body. Chunked or lying uploads are counted as the
-app consumes them and cut off at the first byte past the limit. A
+An oversized declared `Content-Length` is rejected before routing, so
+the cap also covers endpoints and error paths that never read the body.
+Chunked or lying uploads are counted as the app consumes them and cut
+off at the first byte past the limit.
+
+The declaration is read against RFC 9110's `1*DIGIT` rather than handed
+to `int()`, which also accepts `+1`, `1` and `1_000` (silently 1000) -
+forms no HTTP parser produces and none that should be read as a size.
+Anything that does not match is treated as _no_ declaration rather than
+as an error: HTTP framing is the server's job - uvicorn answers such a
+request with a 400 before this app is ever called - while the cap is
+this wrapper's, and the streaming counter enforces it on whatever bytes
+arrive regardless. Raising instead would put a `ValueError` through the
+whole stack of an embedding host whose parser is laxer than uvicorn's,
+and it would escape _outside_ `ServerErrorMiddleware` (which sits inside
+this wrapper), so the client would get no response at all rather than a 500. A
 proxy-level cap is still required to reject an oversized chunked body
 when the selected route never consumes it; the in-app guard is what
 protects a directly exposed container - the distribution image runs
@@ -441,9 +473,9 @@ app setting. Its default is _no_ limit - one request that never finishes
 process alive indefinitely after SIGTERM. Under an orchestrator that
 inverts the intent of a rolling deploy: the replica hangs until the
 termination grace period expires, then SIGKILL severs every connection,
-including the ones that were draining cleanly. So the distribution image
-passes `--timeout-graceful-shutdown "${WEBSITE_GRACEFUL_SHUTDOWN_SECONDS}"`
-(default 20s).
+including the ones that were draining cleanly. So the distribution image sets
+Uvicorn's native `UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN` environment value
+(default 20 seconds).
 
 The value is load-bearing only in relation to the orchestrator's own
 grace period - Kubernetes `terminationGracePeriodSeconds` (30s by
@@ -454,8 +486,54 @@ restores the original failure. Deployments whose requests legitimately
 outlive 20s must raise both, in that order.
 
 `tests/test_graceful_shutdown.py` pins the relationship in both
-directions: that the image's command carries a finite timeout, and that
+directions: that the image's environment carries a finite timeout, and that
 uvicorn actually abandons an in-flight request once it expires.
+
+## Distribution image (`.devcontainer/Dockerfile`)
+
+Effectively every production deployment of this app sits behind an
+ingress or a TLS terminator, so the image has to be deployable behind one
+without a command override. It uses Uvicorn's public `UVICORN_*` environment
+interface directly for every server setting: host, port, root path, proxy
+headers, trusted proxy addresses and graceful-shutdown timeout. `WEBSITE_*` is
+reserved for application settings and Compose topology; there is no second
+image-specific server vocabulary to translate.
+
+The reverse-proxy subset is `UVICORN_ROOT_PATH`, `UVICORN_PROXY_HEADERS` and
+`UVICORN_FORWARDED_ALLOW_IPS`. They default to Uvicorn's behavior - no prefix,
+proxy-header handling enabled and loopback only - so a directly exposed
+container is unchanged; left at those defaults behind a proxy, the site
+advertises an `http://` canonical link for an HTTPS deployment, logs the
+proxy's address as every client's, and drops the URL prefix from every link it
+generates (see "URL generation" above).
+
+Development uses exactly the same contract. Its prefixed listener is a
+dedicated `proxy-backend` Compose service, separate from the `master`
+container's direct listener. That process boundary is what lets the backend
+receive `UVICORN_ROOT_PATH` without leaking the prefix into direct development
+or the test servers `master` launches. Caddy and the backend read the same
+root-path value, and the backend trusts only Caddy's pinned Compose-network
+address (see [QUICKSTART.md](QUICKSTART.md)).
+
+The command is an `ENTRYPOINT`, not a `CMD`, so run-time arguments are
+_appended_ to Uvicorn's rather than replacing the whole command:
+`docker run <image> --root-path /shop`, or a Kubernetes `args:`, works
+without knowing what the image runs. Command-line values take precedence over
+`UVICORN_*` environment values. The entrypoint is the exec-form
+`["uvicorn", "app.main:app"]`: Uvicorn is PID 1 directly, with no shell and no
+project-specific configuration translation layer.
+Setting `ENTRYPOINT` also clears the `python3` `CMD` inherited from the
+base image, so nothing declares a `CMD` here; `docker run --entrypoint sh`
+is how you run something else.
+
+`tests/test_reverse_proxy_config.py` covers both halves of this, the dev
+topology and the image's, and the image's behaviorally: there is no Docker in
+the dev container, so it runs the exec-form entrypoint with the environment
+defaults the Dockerfile declares, and asserts on what the running app then
+generates. Uvicorn is lock-pinned, so those behavioral tests are also the
+upgrade gate: a future release that changes the public environment contract
+fails CI before it can change a deployed image. See also "Bounded graceful
+shutdown" above.
 
 ## Testing strategy (`tests/`)
 

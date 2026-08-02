@@ -1,7 +1,10 @@
 """Shared helpers for tests that drive the factory-built stack or read pages."""
 
+import json
+import re
 import urllib.parse
 from html.parser import HTMLParser
+from pathlib import Path
 from typing import NamedTuple
 
 from fastapi import FastAPI
@@ -11,6 +14,52 @@ from app.middleware import (
     RequestIDMiddleware,
     SecurityHeadersMiddleware,
 )
+
+DOCKERFILE = Path(__file__).parent.parent / ".devcontainer" / "Dockerfile"
+
+
+def distribution_entrypoint() -> list[str]:
+    """
+    Return the distribution image's ENTRYPOINT, as the argv Docker would run.
+
+    Exec-form ENTRYPOINT is a JSON array, so parsing it (rather than reading
+    the line as text) yields the arguments with their backslash-escaped quotes
+    resolved - the very list a test can hand to subprocess to run the image's
+    command outside the image, which is the only way to exercise it in a dev
+    container that has no Docker.
+    """
+    line = next(
+        (
+            line
+            for line in DOCKERFILE.read_text().splitlines()
+            if line.startswith("ENTRYPOINT ")
+        ),
+        "",
+    )
+    assert line, "the distribution stage has no ENTRYPOINT"
+    argv: list[str] = json.loads(line.removeprefix("ENTRYPOINT "))
+    return argv
+
+
+def distribution_environment() -> dict[str, str]:
+    """
+    Return the run-time defaults the distribution stage declares with ENV.
+
+    Only the stage's own `ENV NAME=value` lines, so a test running the
+    entrypoint above starts from exactly the environment the image ships -
+    a default that changes in the Dockerfile changes what the test asserts on,
+    instead of drifting away from a copy hard-coded here.
+    """
+    _, marker, distribution = DOCKERFILE.read_text().partition(
+        "FROM base AS distribution"
+    )
+    assert marker, "the distribution stage was renamed"
+    return {
+        match["name"]: match["value"].strip('"')
+        for match in re.finditer(
+            r"^ENV (?P<name>\w+)=(?P<value>.*)$", distribution, re.MULTILINE
+        )
+    }
 
 
 def security_headers_app(application: RequestIDMiddleware) -> SecurityHeadersMiddleware:

@@ -26,7 +26,7 @@ from app.observability import (
     get_request_id,
 )
 
-from .conftest import allocate_test_port, run_server
+from .conftest import next_test_port, run_server
 
 # uuid4().hex, the shape of a minted ID. Asserted rather than "some string":
 # it is what distinguishes a minted ID from an echoed one below.
@@ -307,7 +307,7 @@ def test_the_log_stream_carries_the_id_of_the_request_it_describes(
     log_path = tmp_path / "server.log"
     with (
         log_path.open("wb") as sink,
-        run_server(allocate_test_port(4), dict(os.environ), output=sink) as base,
+        run_server(next_test_port(), dict(os.environ), output=sink) as base,
     ):
         urllib.request.urlopen(
             urllib.request.Request(
@@ -348,7 +348,7 @@ def test_an_unhandled_exception_reaches_the_log_under_the_request_id(
     with (
         log_path.open("wb") as sink,
         run_server(
-            allocate_test_port(5),
+            next_test_port(),
             dict(os.environ),
             ("--app-dir", str(REPO_ROOT)),
             app_target="tests.failing_app:app",

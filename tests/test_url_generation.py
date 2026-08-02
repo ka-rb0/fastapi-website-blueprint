@@ -44,7 +44,7 @@ def test_rendering_urls_name_no_origin_so_a_proxy_cannot_break_them(
     Nothing the browser must fetch carries a scheme or host.
 
     An absolute asset URL is only right when uvicorn believed the proxy's
-    X-Forwarded-Proto, which it does only for --forwarded-allow-ips peers
+    X-Forwarded-Proto, which it does only for UVICORN_FORWARDED_ALLOW_IPS peers
     (default 127.0.0.1, never the proxy in a container). Get that wrong and
     the URLs come out http:// on an https:// page, where the app's own CSP
     (style-src 'self') blocks them as cross-origin: the site renders

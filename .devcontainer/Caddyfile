@@ -9,7 +9,7 @@
 }
 
 http://proxy.localhost {
-	redir https://proxy.localhost:{$WEBSITE_EXTERNAL_HTTPS_PORT_WITH_REVERSE_PROXY}{uri} 308
+	redir https://proxy.localhost:{$WEBSITE_PROXY_HTTPS_PORT}{uri} 308
 }
 
 https://proxy.localhost {
@@ -27,14 +27,14 @@ https://proxy.localhost {
 	}
 
 	# Keep the canonical public root path slash-terminated.
-	@root_path path {$WEBSITE_REVERSE_PROXY_ROOT_PATH}
-	redir @root_path {$WEBSITE_REVERSE_PROXY_ROOT_PATH}/ 308
+	@root_path path {$UVICORN_ROOT_PATH}
+	redir @root_path {$UVICORN_ROOT_PATH}/ 308
 
-	# handle_path strips the public prefix before forwarding. The second
-	# Uvicorn process receives ordinary app paths while --root-path tells
-	# FastAPI to put the public prefix back into every generated URL.
-	handle_path {$WEBSITE_REVERSE_PROXY_ROOT_PATH}/* {
-		reverse_proxy master:{$WEBSITE_INTERNAL_PORT_WITH_REVERSE_PROXY}
+	# handle_path strips the public prefix before forwarding. The proxy backend
+	# receives ordinary app paths while UVICORN_ROOT_PATH tells FastAPI to put
+	# the public prefix back into every generated URL.
+	handle_path {$UVICORN_ROOT_PATH}/* {
+		reverse_proxy proxy-backend:{$WEBSITE_PROXY_BACKEND_PORT}
 	}
 
 	# This proxy exposes the application only below the configured root path.

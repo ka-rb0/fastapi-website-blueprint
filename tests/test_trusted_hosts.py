@@ -11,14 +11,20 @@ The rest of the page carries no origin at all, so the canonical link is both
 the reason this guard exists and the only place its absence would show.
 """
 
+import json
 import urllib.error
 import urllib.request
 
 import pytest
 
 from app.middleware import SECURITY_HEADERS
+from app.routers import HEALTH_PATH
 
 from .helpers import emitted_urls
+
+# An address a probe would use and no allowlist could contain: the pod IP a
+# Kubernetes httpGet probe sends as Host, assigned when the pod is scheduled.
+PROBE_HOST = "10.244.1.37"
 
 
 def _get_with_host(url: str, host: str) -> urllib.request.Request:
@@ -103,6 +109,57 @@ def test_only_a_trusted_host_reaches_the_canonical_link(
 def test_configured_allowlist_replaces_default(trusted_hosts_server: str) -> None:
     """WEBSITE_TRUSTED_HOSTS replaces the default - it doesn't extend it."""
     request = _get_with_host(trusted_hosts_server, "localhost")
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        urllib.request.urlopen(request, timeout=5)
+    assert excinfo.value.code == 400
+
+
+def test_health_answers_a_probe_the_allowlist_cannot_name(
+    trusted_hosts_server: str,
+) -> None:
+    """
+    The health route answers whatever Host a probe sends.
+
+    PROBE_HOST plays a Kubernetes httpGet probe, which addresses the pod by
+    its own IP: an address assigned at scheduling time, so no
+    WEBSITE_TRUSTED_HOSTS value could contain it and every pod would fail its
+    liveness check into CrashLoopBackOff. The route is exempt from the
+    allowlist instead (see HostValidationMiddleware) - it can be, because it
+    reflects nothing of the request back.
+    """
+    request = _get_with_host(f"{trusted_hosts_server}{HEALTH_PATH}", PROBE_HOST)
+    with urllib.request.urlopen(request, timeout=5) as resp:
+        assert resp.status == 200
+        assert json.loads(resp.read()) == {"status": "ok"}
+
+
+def test_health_exemption_survives_a_root_path(prefixed_server: str) -> None:
+    """
+    The probe still reaches the health route when the app runs under a prefix.
+
+    uvicorn's --root-path folds the prefix into scope["path"], so an
+    exemption compared against a bare "/api/health" would silently stop
+    applying behind exactly the reverse proxy that makes the probe necessary.
+    The request goes to the unprefixed path, as a probe addressing the
+    container directly sends it.
+    """
+    request = _get_with_host(f"{prefixed_server}{HEALTH_PATH}", PROBE_HOST)
+    with urllib.request.urlopen(request, timeout=5) as resp:
+        assert resp.status == 200
+
+
+@pytest.mark.parametrize("path", ["/", "/api/shout", f"{HEALTH_PATH}/"])
+def test_the_exemption_reaches_no_further_than_the_health_route(
+    trusted_hosts_server: str, path: str
+) -> None:
+    """
+    Every other path - including the health route's trailing-slash form - is guarded.
+
+    The trailing slash is the case the exact comparison buys: normalizing the
+    path before matching would exempt a request the router answers with a
+    redirect whose Location is built from the untrusted Host.
+    """
+    request = _get_with_host(f"{trusted_hosts_server}{path}", PROBE_HOST)
     with pytest.raises(urllib.error.HTTPError) as excinfo:
         urllib.request.urlopen(request, timeout=5)
     assert excinfo.value.code == 400

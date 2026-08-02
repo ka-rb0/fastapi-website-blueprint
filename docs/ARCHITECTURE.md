@@ -254,11 +254,25 @@ then logs the traceback ("Exception in ASGI application") - the one
 record an operator most wants to find by ID, and the reason resetting in
 a `finally` would be wrong: the reset would run mid-unwind, before
 uvicorn logs, and file the traceback under `-`. The retained binding
-still dies with the request's context under any ASGI server; the leak
-the reset guards against is confined to an embedded host's exception
-path, where that host's own error logging is exactly what benefits from
-the retained ID. `tests/test_request_id.py` pins both halves: reset
-after a clean response, kept where the server's error logger runs.
+dies with the request's context under any conforming ASGI server, which
+runs each request in a context of its own. A host that instead catches
+the exception in a task it keeps is left holding the stale ID: whatever
+it logs in that context afterwards carries it, and because
+`ContextVar.reset` restores the _previous_ value, the next clean request
+through the middleware restores the stale ID rather than `-`. That is
+the deliberate price of correlating the traceback - within one context
+the two are mutually exclusive - and such a host recovers the guarantee
+the moment it does what servers do: run each request in its own context
+copy. `tests/test_request_id.py` pins both halves: reset after a clean
+response, kept where the server's error logger runs.
+
+A task spawned while a request is in flight inherits the request's ID -
+`asyncio.create_task` copies the context - and keeps it after the
+response completes, the parent's reset notwithstanding. Deliberate:
+background work caused by a request belongs to that request's trace,
+and the copied context is how the ID follows the work the same way it
+follows a call stack. A detached job that deserves a trace of its own
+rebinds with `bind_request_id(None)`, which always mints.
 
 Only `http` scopes are correlated. A WebSocket connection passes through
 the middleware untouched, so adding WebSocket routes means extending it -
@@ -305,12 +319,20 @@ both ways: access lines are INFO, so `LOG_LEVEL=WARNING` quiets the
 per-request line along with the app - deliberate, but worth knowing
 before turning the level down in an incident.
 
-That happens in the lifespan handler, which runs _after_ uvicorn has
-configured logging - the ordering is what lets the app replace it, and
-it keeps `uvicorn app.main:app` working with no `--log-config` flag to
-remember. The cost is the handful of lines uvicorn emits before startup
-("Started server process"), which keep uvicorn's own format; they
-precede the first request and have no ID to carry anyway.
+That happens when `app.main` is imported - the executable boundary, not
+`create_app` or the lifespan. Logging is deployment policy, and an
+embeddable app that reconfigured the process from library code would
+reach into every host that mounts it: its pytest capture, its JSON
+pipeline, its `--log-config`. A host that never imports `app.main`
+keeps its logging untouched and opts in by calling `configure_logging`
+itself (exported from the package root for exactly that). The ordering
+still works with no `--log-config` flag to remember, because uvicorn
+configures its own logging when its `Config` is constructed and imports
+the application module afterwards - so the import wins. The one
+arrangement that degrades is handing an already-imported app object to
+`uvicorn.run()`, where uvicorn's later setup reclaims its own loggers
+and the access line loses the ID; the documented entry point,
+`uvicorn app.main:app`, does not.
 
 The format is human-readable rather than JSON: this is what a developer
 tails locally, and a blueprint should not presume a log pipeline.
@@ -371,14 +393,20 @@ a closure over its settings, like the pages router, so runtime code
 never reads configuration back off `app.state` (state is an
 introspection point for tests and embedding code only).
 
-Logging is configured at startup, not import: importing the package
-(tests, tooling) must not reconfigure the process-wide logging module.
-What it configures - one handler, uvicorn's loggers included - is
-described under "Request correlation" above. Note that the configuration
-is process-global and last-wins: when several apps run in one process,
-the last lifespan to start decides the format and level. That is an
-accepted limitation: per-app isolation covers routing, templates and
-middleware, not process-wide services.
+The lifespan deliberately does not configure logging: that is
+deployment policy, claimed by the process entry point (`app.main` - see
+"Request correlation" above), and a lifespan that reconfigured it would
+run inside every host that mounts this app, test runners included.
+Importing the _package_ stays side-effect free; only importing
+`app.main` takes ownership of process-wide logging. Several apps in one
+process therefore have nothing left to contend for - whoever owns the
+entry point owns logging, the one process-wide service per-app
+isolation never covered.
+
+What the lifespan does own is the startup echo: the settings the
+instance actually booted with, logged once. `app.config` refuses to
+boot on invalid settings, and that strictness is only auditable if the
+configuration that survived is visible in the log.
 
 ### Bounded graceful shutdown (`.devcontainer/Dockerfile`)
 

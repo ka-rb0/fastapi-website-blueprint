@@ -69,11 +69,11 @@ def bind_request_id(candidate: str | None) -> Iterator[str]:
     yield request_id
     # Deliberately not in a finally: an exception unwinding through the yield
     # skips this reset, because uvicorn logs "Exception in ASGI application"
-    # after this block has unwound and that record must carry this ID. The
-    # context is per-request under any ASGI server, so the retained binding
-    # dies with the request's task; the embedded-host leak the reset guards
-    # against is confined to the exception path, where the host's own error
-    # logging is exactly what benefits from the retained ID.
+    # after this block has unwound and that record must carry this ID. Under
+    # any conforming ASGI server the retained binding dies with the request's
+    # own context; a host that catches the exception in a reused task keeps
+    # the stale ID instead - the documented price of correlating the
+    # traceback (see "Request correlation" in docs/ARCHITECTURE.md).
     _request_id.reset(token)
 
 
@@ -101,10 +101,12 @@ def configure_logging(level: str) -> None:
     Their levels become ``NOTSET`` so they inherit the configured root level:
     ``LOG_LEVEL`` then means what it says, uvicorn's hardcoded INFO included.
 
-    Called from the lifespan handler, which runs after uvicorn has configured
-    logging - the ordering that lets this replace it. The few lines uvicorn
-    emits before startup ("Started server process") keep uvicorn's own format;
-    they precede the first request and so have no ID to carry anyway.
+    Called when ``app.main`` is imported - the executable boundary, and the
+    ordering that lets this replace uvicorn's setup, because uvicorn
+    configures its logging when its Config is constructed and imports the
+    application module afterwards. Deliberately not called from anywhere
+    ``create_app`` reaches: logging is deployment policy, and an embedding
+    host keeps its own configuration unless it opts in by calling this.
     """
     logging.config.dictConfig(
         {

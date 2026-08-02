@@ -7,7 +7,6 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from fastapi import FastAPI
 
 from .config import Settings
-from .observability import configure_logging
 from .templating import STATIC_DIR
 
 logger = logging.getLogger(__name__)
@@ -26,12 +25,20 @@ def create_lifespan(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        # Startup, not import time: importing the package must not reconfigure
-        # the process-wide logging module. Logging stays process-global and
-        # last-wins, so with several apps in one process the last lifespan to
-        # start decides the format and level (see docs/ARCHITECTURE.md).
-        configure_logging(settings.log_level)
+        # Deliberately no logging configuration here: logging is deployment
+        # policy, owned by the process entry point (app.main, or an embedding
+        # host's own setup) - a lifespan that reconfigured it would run inside
+        # every host that mounts this app (see docs/ARCHITECTURE.md).
         logger.info("Serving static files from %s", STATIC_DIR)
+        # Echo the surviving configuration once: app.config refuses to boot on
+        # invalid settings, and that strictness is only auditable if what an
+        # instance actually booted with is visible in its log.
+        logger.info(
+            "Trusted hosts: %s; docs %s; request bodies capped at %d bytes",
+            ", ".join(settings.trusted_hosts),
+            "enabled" if settings.docs_enabled else "disabled",
+            settings.max_body_bytes,
+        )
         yield
 
     return lifespan

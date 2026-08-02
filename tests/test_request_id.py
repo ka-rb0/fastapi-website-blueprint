@@ -242,6 +242,49 @@ def test_an_unhandled_exception_is_logged_under_the_request_id() -> None:
     assert MINTED_ID.fullmatch(asyncio.run(drive()))
 
 
+def test_work_spawned_during_a_request_keeps_its_id() -> None:
+    """
+    A task created while the request is in flight inherits its ID for good.
+
+    asyncio.create_task copies the context, so the parent's reset cannot -
+    and must not - reach it: background work caused by a request belongs to
+    that request's trace even when it outlives the response, exactly as the
+    ID follows a call stack. A detached job that deserves a trace of its own
+    rebinds with bind_request_id(None), which always mints.
+    """
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: Message) -> None:
+        pass
+
+    scope: Scope = {"type": "http", "method": "GET", "path": "/", "headers": []}
+
+    async def drive() -> tuple[str, str]:
+        response_done = asyncio.Event()
+        spawned: asyncio.Task[str] | None = None
+
+        async def read_id_after_the_response() -> str:
+            await response_done.wait()
+            return get_request_id()
+
+        async def inner(scope: Scope, receive: Receive, send: Send) -> None:
+            nonlocal spawned
+            spawned = asyncio.create_task(read_id_after_the_response())
+            await send({"type": "http.response.start", "status": 204, "headers": []})
+            await send({"type": "http.response.body", "body": b""})
+
+        await RequestIDMiddleware(inner)(scope, receive, send)
+        response_done.set()
+        assert spawned is not None
+        return get_request_id(), await spawned
+
+    parent_after, spawned_after = asyncio.run(drive())
+    assert parent_after == NO_REQUEST_ID, "the request's own context missed the reset"
+    assert MINTED_ID.fullmatch(spawned_after), "the spawned task lost the request's ID"
+
+
 def test_the_log_stream_carries_the_id_of_the_request_it_describes(
     tmp_path: Path,
 ) -> None:

@@ -112,8 +112,8 @@ To use a different port:
 
 ```bash
 docker run --rm --init \
-  --env WEBSITE_INTERNAL_PORT=20166 \
-  --publish 20166:20166 \
+  --env WEBSITE_INTERNAL_PORT=11111 \
+  --publish 11111:11111 \
   fastapi-website-blueprint:distribution
 ```
 

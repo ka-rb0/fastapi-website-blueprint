@@ -26,8 +26,8 @@ SRC_DIR = Path(__file__).parent.parent / "src"
 # consecutive port each (allocated through allocate_test_port) - the session
 # fixtures below plus the servers individual tests start for themselves.
 # Factory-only configuration variants need no server - and no port.
-PORT_MIN = int(os.environ.get("WEBSITE_TEST_PORT_MIN", "20177"))
-PORT_MAX = int(os.environ.get("WEBSITE_TEST_PORT_MAX", "20182"))
+PORT_MIN = int(os.environ.get("WEBSITE_TEST_PORT_MIN", "11120"))
+PORT_MAX = int(os.environ.get("WEBSITE_TEST_PORT_MAX", "11199"))
 if PORT_MIN > PORT_MAX:
     # Caught here rather than in allocate_test_port, where an inverted range would
     # surface as the "widen the range" error below - misleading advice when
@@ -65,10 +65,17 @@ def start_server(
     env: dict[str, str],
     extra_args: tuple[str, ...] = (),
     *,
+    app_target: str = "app.main:app",
     output: IO[bytes] | None = None,
 ) -> subprocess.Popen[bytes]:
     """
     Start uvicorn on `port` with exactly `env` and return it once healthy.
+
+    `app_target` is the import string uvicorn serves; it defaults to the
+    deployed entry point, which is what nearly every test wants. A test that
+    needs behavior the real app never exhibits (tests/failing_app.py, which
+    raises on purpose) points it at its own module instead - still through
+    `app.main`, so what is under test is the real logging setup.
 
     `output` collects the server's whole log stream (stdout and stderr into
     one file, as a terminal or `docker logs` would show it); the default
@@ -80,7 +87,7 @@ def start_server(
             sys.executable,
             "-m",
             "uvicorn",
-            "app.main:app",
+            app_target,
             "--host",
             "127.0.0.1",
             "--port",
@@ -120,6 +127,7 @@ def run_server(
     env: dict[str, str],
     extra_args: tuple[str, ...] = (),
     *,
+    app_target: str = "app.main:app",
     output: IO[bytes] | None = None,
 ) -> Iterator[str]:
     """
@@ -128,7 +136,7 @@ def run_server(
     The server is stopped and reaped before the block ends, so an `output`
     file is complete and flushed by the time the caller reads it.
     """
-    proc = start_server(port, env, extra_args, output=output)
+    proc = start_server(port, env, extra_args, app_target=app_target, output=output)
     try:
         yield f"http://127.0.0.1:{port}"
     finally:

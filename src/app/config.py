@@ -16,6 +16,13 @@ class Settings:
     docs_enabled: bool = False
     trusted_hosts: tuple[str, ...] = DEFAULT_TRUSTED_HOSTS
     max_body_bytes: int = DEFAULT_MAX_BODY_BYTES
+    # Validated here, but deliberately not consumed by create_app: the level is
+    # applied by whoever owns the process (app.main hands it to
+    # configure_logging), because logging is process-wide policy and a second
+    # app in the same process cannot have a level of its own. Passing a level
+    # to create_app therefore changes nothing on its own - it is validated at
+    # boot and read at the entry point. See "Request correlation" and
+    # "Lifespan" in docs/ARCHITECTURE.md.
     log_level: str = "INFO"
 
     def __post_init__(self) -> None:

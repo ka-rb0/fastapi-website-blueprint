@@ -8,7 +8,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 
-REQUEST_ID_HEADER = "x-request-id"
+REQUEST_ID_HEADER = "X-Request-ID"
 
 # What %(request_id)s shows for records emitted outside a request - startup,
 # shutdown, background work. A placeholder rather than an empty field, so

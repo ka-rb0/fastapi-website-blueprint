@@ -326,13 +326,31 @@ reach into every host that mounts it: its pytest capture, its JSON
 pipeline, its `--log-config`. A host that never imports `app.main`
 keeps its logging untouched and opts in by calling `configure_logging`
 itself (exported from the package root for exactly that). The ordering
-still works with no `--log-config` flag to remember, because uvicorn
-configures its own logging when its `Config` is constructed and imports
-the application module afterwards - so the import wins. The one
-arrangement that degrades is handing an already-imported app object to
-`uvicorn.run()`, where uvicorn's later setup reclaims its own loggers
-and the access line loses the ID; the documented entry point,
-`uvicorn app.main:app`, does not.
+needs no flag to remember, because uvicorn configures its own logging
+when its `Config` is constructed and imports the application module
+afterwards - so the import wins. It wins under `--reload` and
+`--workers` as well, where each child process re-runs uvicorn's setup
+before loading the app.
+
+Winning that race is the point, and it is also the sharp edge: importing
+`app.main` silently **overrides the root and Uvicorn portions of
+`uvicorn --log-config`**. An operator who points that flag at a JSON
+pipeline for those loggers gets this module's human-readable format
+instead, with nothing in the log to say that configuration was replaced.
+Explicitly named non-Uvicorn loggers may retain handlers from the flag,
+however, because this module leaves existing loggers enabled; the result
+can therefore be mixed rather than a complete override. That is the
+standing cost of claiming logging from the application module, and it is
+the arrangement most likely to be hit, because `--log-config` is
+uvicorn's documented way to reshape logs for a deployment. A deployment
+that needs the flag honored should serve an entry point of its own that
+calls `create_app` and never imports `app.main`.
+
+The second arrangement that degrades does so in the other direction:
+handing an already-imported app object to `uvicorn.run()` lets uvicorn's
+later setup reclaim its own loggers, and the access line loses the ID.
+The documented string entry point, `uvicorn app.main:app`, avoids that
+second problem but retains the `--log-config` tradeoff above.
 
 The format is human-readable rather than JSON: this is what a developer
 tails locally, and a blueprint should not presume a log pipeline.

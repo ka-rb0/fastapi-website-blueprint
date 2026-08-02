@@ -32,6 +32,9 @@ from .conftest import allocate_test_port, run_server
 # it is what distinguishes a minted ID from an echoed one below.
 MINTED_ID = re.compile(r"[0-9a-f]{32}")
 
+# Handed to uvicorn's --app-dir so a server can import tests.failing_app.
+REPO_ROOT = Path(__file__).parent.parent
+
 
 def _request_id_of(
     url: str, *, sent: str | None = None, host: str | None = None
@@ -320,3 +323,56 @@ def test_the_log_stream_carries_the_id_of_the_request_it_describes(
     assert re.search(
         rf"INFO app\.lifecycle \[{NO_REQUEST_ID}\] Serving static files", log
     ), f"the startup line is not marked as belonging to no request:\n{log}"
+
+
+def test_an_unhandled_exception_reaches_the_log_under_the_request_id(
+    tmp_path: Path,
+) -> None:
+    """
+    Uvicorn's traceback for a failed request is filed under that request's ID.
+
+    The in-process test above pins the app's half of this - the binding
+    survives an exception unwinding through the middleware - but the half that
+    makes the design worth its cost belongs to uvicorn: that it logs
+    "Exception in ASGI application" *after* the middleware has unwound, still
+    inside the request's context. That is a claim about uvicorn, so it gets a
+    real server, exactly like the access line above; a passing in-process test
+    would otherwise coexist with tracebacks logged under `-`.
+
+    tests/failing_app.py supplies the route that raises, since the app has
+    none, and is served through `app.main` so the logging setup under test is
+    the deployed one. --app-dir puts the repo root on the server's sys.path,
+    which is what makes `tests.failing_app` importable next to `app`.
+    """
+    log_path = tmp_path / "server.log"
+    with (
+        log_path.open("wb") as sink,
+        run_server(
+            allocate_test_port(5),
+            dict(os.environ),
+            ("--app-dir", str(REPO_ROOT)),
+            app_target="tests.failing_app:app",
+            output=sink,
+        ) as base,
+    ):
+        # The literal, rather than importing it from tests.failing_app:
+        # importing that module here would run app.main in the pytest process,
+        # taking over pytest's own log capture for the rest of the session.
+        request = urllib.request.Request(
+            f"{base}/boom", headers={REQUEST_ID_HEADER: "failed-request-id"}
+        )
+        with pytest.raises(urllib.error.HTTPError) as raised:
+            urllib.request.urlopen(request, timeout=5).close()
+        with raised.value as error:
+            assert error.code == 500
+            # The ID the client is left holding must be the one to search for.
+            assert error.headers[REQUEST_ID_HEADER] == "failed-request-id"
+    log = log_path.read_text()
+
+    assert re.search(
+        r"ERROR uvicorn\.error \[failed-request-id\] Exception in ASGI application",
+        log,
+    ), f"the traceback is not filed under the failed request's ID:\n{log}"
+    assert "RuntimeError: kaboom" in log, (
+        f"the traceback itself never reached the log:\n{log}"
+    )

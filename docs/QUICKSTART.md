@@ -30,7 +30,7 @@ uvicorn app.main:app \
 
 - Open an external desktop browser (in your host)
   - Go to `https://proxy.localhost:$WEBSITE_EXTERNAL_HTTPS_PORT_WITH_REVERSE_PROXY$WEBSITE_REVERSE_PROXY_ROOT_PATH/`
-    - e.g. <https://proxy.localhost:11121/prefix/>
+    - e.g. <https://proxy.localhost:11211/prefix/>
 
 ## Good to know
 
@@ -65,6 +65,13 @@ uvicorn app.main:app \
   rather than refused. Lines with no request behind them (startup, shutdown)
   show `[-]`. `LOG_LEVEL` sets the level for the app and uvicorn alike -
   access lines are INFO, so `WARNING` and up silences them too.
+- Importing `app.main` claims process-wide logging, so **the root and Uvicorn
+  portions of `uvicorn --log-config` are silently overridden** when you serve
+  `app.main:app`; explicitly named non-Uvicorn loggers may retain their
+  configuration, potentially producing mixed output. Reshape the claimed logs
+  by editing `LOG_FORMAT` in `src/app/observability.py`, or, if the flag has to
+  win, serve your own entry point that calls `create_app` without importing
+  `app.main` (see "Request correlation" in [ARCHITECTURE.md](ARCHITECTURE.md)).
 - `--forwarded-allow-ips="$WEBSITE_REVERSE_PROXY_TRUSTED_IP"` defaults to
   Caddy's pinned Compose-network address (see `docker-compose.yml`), not
   `*`: uvicorn only honors X-Forwarded-For/X-Forwarded-Proto from that one

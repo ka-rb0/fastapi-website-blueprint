@@ -24,6 +24,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from app.routers.probes import LIVENESS_PATH
+
 from .conftest import SRC_DIR, next_test_port, run_server_command
 from .helpers import distribution_entrypoint, distribution_environment
 
@@ -64,9 +66,9 @@ def _running_image(**overrides: str) -> Iterator[str]:
         yield base_url
 
 
-def _health_status(sock: socket.socket) -> int:
-    """Return the status of one GET /api/health sent over an open socket."""
-    sock.sendall(b"GET /api/health HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+def _liveness_status(sock: socket.socket) -> int:
+    """Return the status of one GET /livez sent over an open socket."""
+    sock.sendall(b"GET /livez HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
     status_line = sock.recv(64).split(b"\r\n", 1)[0]
     return int(status_line.split(b" ")[1])
 
@@ -105,7 +107,7 @@ def test_excess_connections_are_shed_with_503() -> None:
             for _ in range(TEST_LIMIT + 1):
                 sock = socket.create_connection(("127.0.0.1", port), timeout=5)
                 held.append(sock)
-                statuses.append(_health_status(sock))
+                statuses.append(_liveness_status(sock))
         finally:
             for sock in held:
                 sock.close()
@@ -123,7 +125,7 @@ def test_image_does_not_name_the_server_software() -> None:
     """Responses carry no Server header, while Date - which caches need - stays."""
     with (
         _running_image() as base_url,
-        urllib.request.urlopen(f"{base_url}/api/health", timeout=5) as response,
+        urllib.request.urlopen(f"{base_url}{LIVENESS_PATH}", timeout=5) as response,
     ):
         headers = response.headers
     assert headers.get("Server") is None, (

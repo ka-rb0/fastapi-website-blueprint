@@ -150,7 +150,7 @@ To run something other than the server, override the entrypoint
 (`docker run --entrypoint sh ...`).
 
 The container runs as an unprivileged user and includes a health check for
-`/api/health`, the one route that answers whatever `Host` a probe sends -
+`/readyz`, one of the probe routes that answer whatever `Host` a probe sends -
 `WEBSITE_TRUSTED_HOSTS` does not have to name the pod's own address.
 
 ## Published images

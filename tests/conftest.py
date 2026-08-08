@@ -22,6 +22,8 @@ from typing import IO
 
 import pytest
 
+from app.routers.probes import READINESS_PATH
+
 SRC_DIR = Path(__file__).parent.parent / "src"
 # The inclusive port range every live server in the suite draws from, one
 # consecutive port each (allocated through next_test_port) - the session
@@ -123,7 +125,7 @@ def start_server_command(
     output: IO[bytes] | None = None,
 ) -> subprocess.Popen[bytes]:
     """
-    Run `argv` and return it once it answers /api/health on `port`.
+    Run `argv` and return it once it answers /readyz on `port`.
 
     The argv is a parameter rather than built here so a test can start a
     server this suite did not compose - the distribution image's entrypoint
@@ -137,18 +139,20 @@ def start_server_command(
         stdout=output,
         stderr=subprocess.STDOUT if output is not None else None,
     )
-    health_url = f"http://127.0.0.1:{port}/api/health"
+    # Readiness, not liveness: "can this server take traffic yet" is the
+    # question a fixture waiting to send some is actually asking.
+    readiness_url = f"http://127.0.0.1:{port}{READINESS_PATH}"
     deadline = time.monotonic() + 15
     while True:
         try:
-            with urllib.request.urlopen(health_url, timeout=1):
+            with urllib.request.urlopen(readiness_url, timeout=1):
                 return proc
         except urllib.error.HTTPError as err:
-            # The server is up but health failed - fail fast with the real
+            # The server is up but the probe failed - fail fast with the real
             # status instead of spinning until the deadline. (HTTPError is
             # an OSError subclass, so this except must come first.)
             _kill_and_reap(proc)
-            raise RuntimeError(f"/api/health returned HTTP {err.code}") from err
+            raise RuntimeError(f"{READINESS_PATH} returned HTTP {err.code}") from err
         except OSError as err:
             if proc.poll() is not None:
                 # No reap needed: the poll() that detected the exit did it.
@@ -259,8 +263,8 @@ def trusted_hosts_server() -> Iterator[str]:
     site.example stands in for a deployment's public host name (the Host a
     reverse proxy forwards) and is the whole allowlist - no local name beside
     it, exactly as a production deployment would set it. The readiness poll
-    in start_server still reaches /api/health over the loopback, because that
-    route is exempt from the allowlist (see HostValidationMiddleware); a
+    in start_server still reaches /readyz over the loopback, because the probe
+    routes are exempt from the allowlist (see HostValidationMiddleware); a
     regression there fails this fixture with the status the poll got, which
     is also what would mark the distribution image's HEALTHCHECK unhealthy.
     """

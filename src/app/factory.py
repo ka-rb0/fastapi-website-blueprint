@@ -12,7 +12,7 @@ from .middleware import (
     RequestIDMiddleware,
     SecurityHeadersMiddleware,
 )
-from .routers import HEALTH_PATH, api_router, create_pages_router
+from .routers import PROBE_PATHS, api_router, create_pages_router, probes_router
 from .templating import STATIC_DIR, create_templates
 
 APP_TITLE = "FastAPI Website Blueprint"
@@ -42,16 +42,17 @@ def create_app(settings: Settings) -> RequestIDMiddleware:
     fastapi_app.state.settings = settings
     fastapi_app.state.templates = templates
 
-    # The health route is exempt: an orchestrator probes a pod by its own IP,
+    # The probe routes are exempt: an orchestrator probes a pod by its own IP,
     # which no allowlist can name in advance (see HostValidationMiddleware and
     # "Trusted hosts" in docs/ARCHITECTURE.md).
     fastapi_app.add_middleware(
         HostValidationMiddleware,
         allowed_hosts=settings.trusted_hosts,
-        exempt_paths=(HEALTH_PATH,),
+        exempt_paths=PROBE_PATHS,
     )
     fastapi_app.include_router(create_pages_router(templates))
     fastapi_app.include_router(api_router)
+    fastapi_app.include_router(probes_router)
     register_exception_handlers(fastapi_app, templates)
 
     # Mount assets last so application routes always take precedence. No

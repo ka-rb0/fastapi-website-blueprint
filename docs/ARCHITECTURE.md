@@ -201,19 +201,79 @@ still carries the security headers, because `SecurityHeadersMiddleware`
 sits outside the framework.
 
 `HostValidationMiddleware` (`src/app/middleware.py`) is what applies that
-check, and it exempts one path: the health route. A Kubernetes `httpGet`
-probe addresses the pod by the IP it was scheduled with and sends it as
-`Host`, so no allowlist can contain it - a guarded health route means
-every pod fails its own liveness check and restarts forever, on a
-deployment that is otherwise configured correctly. The route can be
-exempt because the invariant above does not reach it: it renders no
-template and reflects nothing of the request, it answers a constant
-`{"status": "ok"}`. Nothing else is exempt, and the comparison is
-deliberately exact (after `root_path` is removed, never normalized) -
-normalizing would _widen_ an exemption, the opposite of the CSP check,
-where it narrows a relaxation. `/api/health/` is the case that shows it:
-the router answers the trailing-slash form with a redirect whose
-`Location` it builds from the `Host` header.
+check, and it exempts exactly the probe routes below (`PROBE_PATHS`). A
+Kubernetes `httpGet` probe addresses the pod by the IP it was scheduled
+with and sends it as `Host`, so no allowlist can contain it - a guarded
+probe route means every pod fails its own liveness check and restarts
+forever, on a deployment that is otherwise configured correctly. Those
+routes can be exempt because the invariant above does not reach them:
+they render no template and reflect nothing of the request, they answer a
+constant `{"status": "ok"}`. That property is the price of admission to
+`PROBE_PATHS` - `tests/test_trusted_hosts.py` parametrizes over the whole
+tuple so a route added without it fails there. Nothing else is exempt,
+and the comparison is deliberately exact (after `root_path` is removed,
+never normalized) - normalizing would _widen_ an exemption, the opposite
+of the CSP check, where it narrows a relaxation. `/livez/` is the case
+that shows it: the router answers the trailing-slash form with a redirect
+whose `Location` it builds from the `Host` header.
+
+## Probe endpoints (`src/app/routers/probes.py`)
+
+Three paths, two decisions:
+
+| Path       | Failure means              | Orchestrator's response   |
+| ---------- | -------------------------- | ------------------------- |
+| `/livez`   | the process is wedged      | restart the container     |
+| `/readyz`  | this instance can't serve  | stop routing to it        |
+| `/healthz` | legacy alias for the above | (whatever it is wired to) |
+
+The split is the point, not the spelling. Nothing reads the path - a
+probe's URL is configuration (`httpGet.path`), and the `z` suffix is a
+Google-ism Kubernetes inherited - so what the names buy is a place for
+the two decisions to live separately. **Dependency checks belong in
+`readyz` and never in `livez`**: liveness failing is answered by killing
+the container, so a liveness check that reaches a database converts one
+slow dependency into every replica restarting at once, which cannot
+repair a dependency and destroys the capacity that was still serving.
+Readiness failing is answered by removing the instance from rotation
+while it keeps running and recovers, which is the response that fits.
+
+`/healthz` is kept for tooling that reaches for the name unprompted, and
+is documented as an alias rather than a third opinion - Kubernetes
+deprecated it on its own API server in v1.16 and replaced it with the
+other two, for the reason above. If it ever has to stop being a constant
+it should follow readiness; the wrong guess there restarts the fleet.
+
+This app depends on nothing, so all three currently answer the same
+constant. That is the honest state of a blueprint, and the seam is what
+has value: the check a fork eventually adds lands on the route wired to
+the action that suits it, instead of on a single `health` route wired to
+both.
+
+**There is deliberately no readiness state that flips on shutdown.** The
+obvious next step - fail `readyz` once SIGTERM arrives, so the load
+balancer drains the instance before it stops - is already handled a layer
+down, because uvicorn closes the listening socket immediately on SIGTERM
+and only then drains in-flight requests. Measured against this app: a new
+connection is refused 200 ms after the signal, while a request already in
+flight keeps going (see "Bounded graceful shutdown" below).
+
+```text
+t+0.2s: connect -> [Errno 111] Connection refused
+```
+
+A probe gets a connection error, which every orchestrator already reads
+as a failed probe, so a readiness flag would be machinery no probe could
+ever observe. What the drain window actually needs is the orchestrator
+removing the endpoint before it signals - a `preStop` hook - which is
+deployment configuration, not something an endpoint can express.
+
+The routes sit at the root rather than under `/api`: they answer an
+operator, not a caller of the product's API, an ingress may want to route
+or refuse them separately, and they must keep answering when every `/api`
+route is gone. They return `ProbeStatus` rather than `dict[str, str]` so
+the generated schema names the field - orchestrators decide on the status
+code alone, but the body is documented surface.
 
 The alternative was to make every deployment configure
 `httpHeaders: [{name: Host, ...}]` on both probes, or list the pod CIDR

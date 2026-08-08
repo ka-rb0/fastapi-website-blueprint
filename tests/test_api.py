@@ -11,7 +11,7 @@ import pytest
 
 from app.config import Settings
 from app.middleware import DOCS_CSP, SECURITY_HEADERS
-from app.routers import HEALTH_PATH
+from app.routers.probes import LIVENESS_PATH
 from app.schemas import MAX_SHOUT_LENGTH
 
 
@@ -33,20 +33,6 @@ def _post_json_request(url: str, body: bytes) -> urllib.request.Request:
     return urllib.request.Request(
         url, data=body, method="POST", headers={"Content-Type": "application/json"}
     )
-
-
-def test_health(server: str) -> None:
-    """
-    The health route answers - reached through the constant that names it.
-
-    HEALTH_PATH is what the composition root exempts from the Host allowlist
-    (see app.factory), so requesting it here is also what keeps the constant
-    from drifting away from the route it is supposed to name: a stale value
-    would 404 rather than quietly exempt a path nothing serves.
-    """
-    with urllib.request.urlopen(f"{server}{HEALTH_PATH}", timeout=5) as resp:
-        assert resp.status == 200
-        assert json.load(resp) == {"status": "ok"}
 
 
 def test_shout_uppercases(server: str) -> None:
@@ -101,7 +87,7 @@ def test_oversized_body_rejected(server: str, max_body_bytes: int) -> None:
 
 @pytest.mark.parametrize(
     ("method", "path"),
-    [("GET", "/api/health"), ("POST", "/no-such-route")],
+    [("GET", LIVENESS_PATH), ("POST", "/no-such-route")],
 )
 def test_oversized_declared_body_rejected_before_routing(
     server: str, method: str, path: str, max_body_bytes: int
@@ -182,10 +168,10 @@ def test_unknown_api_path_stays_json(server: str, path: str) -> None:
     assert excinfo.value.headers["Content-Type"] == "application/json"
 
 
-@pytest.mark.parametrize("path", ["/", "/api/health"])
+@pytest.mark.parametrize("path", ["/", LIVENESS_PATH])
 def test_security_headers(server: str, path: str) -> None:
     """
-    The ASGI wrapper puts the headers on every response - static and API alike.
+    The ASGI wrapper puts the headers on every response - pages and probes alike.
 
     Error responses are covered in test_security_headers.py.
     """

@@ -2,18 +2,18 @@
 
 # uv installs the locked dependencies below. A named stage rather than a
 # direct COPY --from=<image>: Dependabot only bumps FROM lines.
-FROM ghcr.io/astral-sh/uv:0.12.0@sha256:606e70c71c852d03f611b1e56a195d08648507018a7057fab82c4974c4eae105 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.3@sha256:2d890623d310b57771ce840f0da5eed5fc6d657da05ffaa45d82797b53fa3abc AS uv
 
 # Node.js comes from the official image - digest-pinned and Dependabot-bumped
 # like the other base images. The Debian release (trixie) matches the Python
 # image, so the copied binary finds matching shared libraries. The major must
 # match engines.node in package.json; tests/test_node_version_consistency.py
 # enforces that.
-FROM node:26-slim@sha256:715e55e4b84e4bb0ff48e49b398a848f08e55daed8eb6a0ea1839ae53bc57583 AS node
+FROM node:26-slim@sha256:4ebb5ace66f15a24c14c492e01a8beeed4fddf970a856109f5126e703e5fe503 AS node
 
 # Pinned to the same Python line as requires-python in pyproject.toml;
 # Dependabot bumps both tags and digests (see .github/dependabot.yml).
-FROM python:3.14-slim@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea54bca189ce14a6 AS base
+FROM python:3.14-slim@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc AS base
 
 COPY --from=uv /uv /uvx /usr/local/bin/
 
@@ -53,6 +53,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     fd-find \
     dos2unix \
+    jq \
     libatomic1 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

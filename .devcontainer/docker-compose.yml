@@ -110,7 +110,7 @@ services:
     # It starts with the Dev Container but remains independent: `master` does
     # not depend on it, and removing this service leaves direct development
     # unchanged. The tag and multi-platform digest are Dependabot-managed.
-    image: caddy:2.11.3-alpine@sha256:86deaf5e3d3408a6ccec08fbb79989783dd26e206ae10bcf78a801dc8c9ab794
+    image: caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
     init: true
     environment:
       WEBSITE_PROXY_HTTPS_PORT: ${WEBSITE_PROXY_HTTPS_PORT:?set it in .devcontainer/.env, see .env.example}

@@ -200,3 +200,101 @@ Two things worth knowing:
 
 💰 Public repos only, on two counts: publishing results requires a public repo,
 and the SARIF upload needs code scanning. Delete the workflow on a private fork.
+
+## 9. Deploying releases to Azure Container Apps
+
+The `deploy` job in [publish.yml](../.github/workflows/publish.yml) rolls every
+full release out to Azure automatically: push `v1.2.3`, and once the image is
+published, signed and verified, that exact digest becomes the running revision.
+Prereleases (`v1.2.3-rc.1`) publish an image and stop there, like `:latest`.
+
+It signs in with OIDC, so **there is no Azure secret in this repo** - the three
+`AZURE_*` values are identifiers, not credentials, and nothing needs rotating.
+
+### The environment is what makes the login work
+
+The job declares `environment: production`, and that is load-bearing rather
+than cosmetic. An Azure federated identity credential matches **one fixed
+subject**. A deploy job running on a tag would present
+
+```text
+repo:<owner>/<repo>:ref:refs/tags/v1.2.3
+```
+
+which is a different string for every release and can therefore never match a
+stored subject. Naming the environment changes it to a constant:
+
+```text
+repo:<owner>/<repo>:environment:production
+```
+
+So two things must line up, once:
+
+1. **GitHub** - **Settings → Environments → New environment**, named exactly
+   `production`. Add required reviewers here if you want releases to pause for
+   approval; the job waits for them before touching Azure.
+2. **Azure** - the federated credential on the app registration must use
+   **Entity type: Environment** with the value `production`. If it was created
+   against a branch or tag instead, edit it - a mismatch fails at `azure/login`
+   with `AADSTS700213`.
+
+### What the deploy owns, and what it does not
+
+The job reads the container app's ingress and refuses to deploy into a shape
+that would fail quietly: no ingress, a `targetPort` other than 8000 (the port
+the image listens on), or multiple-revision mode, where a new revision is
+created with no traffic and the deploy would be a green no-op. Each of those
+fails with the `az` command that fixes it.
+
+It then sets two environment variables on every deploy, because the image
+cannot get either right on its own:
+
+- `WEBSITE_TRUSTED_HOSTS` - derived from the ingress FQDN **plus any bound
+  custom domains**, so adding a domain does not take the site down on the next
+  release. Unset, every route except `/api/health` answers 400.
+- `UVICORN_FORWARDED_ALLOW_IPS=*` - Container Apps puts an Envoy ingress in
+  front of the container, and it is never loopback, so the image's `127.0.0.1`
+  default can never match it. [QUICKSTART.md](QUICKSTART.md) argues against
+  `*`, and that argument is right whenever clients can reach the container
+  directly - here they cannot, because Container Apps routes to the target
+  port only through ingress. Revisit this if that ever stops being true.
+
+Everything else on the container app is left alone (`--set-env-vars` upserts
+only the names it is given), so scaling rules, secrets and any other variables
+you set stay yours. Note that `WEBSITE_ENABLE_DOCS` is deliberately not set:
+Swagger UI stays off in production.
+
+### It is not done until the site answers
+
+After the revision reports `Running`, the job probes both `/api/health` **and**
+the homepage. The health route alone would prove nothing about configuration -
+it is the one path exempt from the Host allowlist, so it returns 200 even when
+`WEBSITE_TRUSTED_HOSTS` is wrong and every real page returns 400. That is the
+most likely way this deployment breaks, and the homepage probe is what catches
+it.
+
+### Setting the target
+
+Which resources a release lands on is a property of the repository, not of the
+code, so the job reads two **variables** rather than hard-coded names. Add them
+under **Settings → Secrets and variables → Actions → Variables**:
+
+| Variable               | Example                        |
+| ---------------------- | ------------------------------ |
+| `AZURE_RESOURCE_GROUP` | `fastapi-website-blueprint-rc` |
+| `AZURE_CONTAINER_APP`  | `fastapi-website-blueprint-ca` |
+
+They are variables, not secrets: resource names are not confidential, and
+`vars` stay readable in the run log - exactly what you want to see when a
+deploy lands somewhere unexpected. Scope them to the repository, or to the
+`production` environment if you later add a second environment with its own
+resources; `vars` resolves either.
+
+A missing variable interpolates to an empty string instead of failing, so the
+job's first step checks both and names the one that is unset. Retargeting a
+fork therefore needs no commit - only two settings.
+
+💰 Azure resources cost money regardless of repository visibility; the GitHub
+side is free. The container app pulls from `ghcr.io`, so the package must stay
+**public** (section 6) - otherwise give the container app a registry credential
+with `az containerapp registry set`.

@@ -2,7 +2,7 @@
 
 import urllib.error
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Generator
 
 import pytest
 from playwright.sync_api import Browser, ConsoleMessage, Page, expect, sync_playwright
@@ -25,7 +25,7 @@ def _cdn_reachable() -> bool:
 
 
 @pytest.fixture(scope="module")
-def browser() -> Iterator[Browser]:
+def browser() -> Generator[Browser]:
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
         yield browser
@@ -33,7 +33,7 @@ def browser() -> Iterator[Browser]:
 
 
 @pytest.fixture
-def page(browser: Browser, server: str) -> Iterator[Page]:
+def page(browser: Browser, server: str) -> Generator[Page]:
     """Open a fresh page (own context, own localStorage) so tests stay independent."""
     page = browser.new_page()
     page.goto(server)

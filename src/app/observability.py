@@ -4,7 +4,7 @@ import logging
 import logging.config
 import re
 import uuid
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 
@@ -40,7 +40,7 @@ def get_request_id() -> str:
 
 
 @contextmanager
-def bind_request_id(candidate: str | None) -> Iterator[str]:
+def bind_request_id(candidate: str | None) -> Generator[str]:
     """
     Bind a correlation ID for the duration of the block and yield it.
 

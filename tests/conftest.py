@@ -15,7 +15,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import IO
@@ -171,7 +171,7 @@ def run_server(
     *,
     app_target: str = "app.main:app",
     output: IO[bytes] | None = None,
-) -> Iterator[str]:
+) -> Generator[str]:
     """
     Start uvicorn on `port` with exactly `env`, yield its base URL when healthy.
 
@@ -192,7 +192,7 @@ def run_server_command(
     *,
     cwd: Path = SRC_DIR,
     output: IO[bytes] | None = None,
-) -> Iterator[str]:
+) -> Generator[str]:
     """Run `argv` (see start_server_command) and yield its base URL while healthy."""
     with _serving(
         start_server_command(argv, port, env, cwd=cwd, output=output), port
@@ -201,7 +201,7 @@ def run_server_command(
 
 
 @contextmanager
-def _serving(proc: subprocess.Popen[bytes], port: int) -> Iterator[str]:
+def _serving(proc: subprocess.Popen[bytes], port: int) -> Generator[str]:
     """Yield the base URL of an already-healthy `proc`, then stop and reap it."""
     try:
         yield f"http://127.0.0.1:{port}"
@@ -219,7 +219,7 @@ def _serving(proc: subprocess.Popen[bytes], port: int) -> Iterator[str]:
 
 
 @pytest.fixture(scope="session")
-def server() -> Iterator[str]:
+def server() -> Generator[str]:
     """Start the server most tests hit, once per session."""
     # Docs on, explicitly: the suite tests the /docs page and its CSP
     # exception, so it must not depend on the shell's environment. And
@@ -232,7 +232,7 @@ def server() -> Iterator[str]:
 
 
 @pytest.fixture(scope="session")
-def prefixed_server() -> Iterator[str]:
+def prefixed_server() -> Generator[str]:
     """
     Start a server deployed under the URL prefix /prefix.
 
@@ -256,7 +256,7 @@ def prefixed_server() -> Iterator[str]:
 
 
 @pytest.fixture(scope="session")
-def trusted_hosts_server() -> Iterator[str]:
+def trusted_hosts_server() -> Generator[str]:
     """
     Start a server with an explicit WEBSITE_TRUSTED_HOSTS allowlist.
 

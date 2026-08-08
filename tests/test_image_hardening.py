@@ -20,7 +20,7 @@ environment says nothing about what the image ships. See "Backpressure" and
 import os
 import socket
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -38,7 +38,7 @@ TEST_LIMIT = 4
 
 
 @contextmanager
-def _running_image(**overrides: str) -> Iterator[str]:
+def _running_image(**overrides: str) -> Generator[str]:
     """
     Run the image's entrypoint locally with its own ENV defaults, plus overrides.
 

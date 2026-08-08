@@ -53,15 +53,18 @@ the finished app keeps even those 500s stamped and correlated.
 A frozen, slotted dataclass validated in `__post_init__`: an instance
 that exists is safe to build an app from. Invalid configuration
 (no trusted hosts after stripping blanks, non-positive body cap, unknown
-log level, an unrecognized `WEBSITE_ENABLE_DOCS` value) refuses to boot
-instead of producing a misbehaving server - e.g.
+log level or log format, an unrecognized `WEBSITE_ENABLE_DOCS` value)
+refuses to boot instead of producing a misbehaving server - e.g.
 `WEBSITE_TRUSTED_HOSTS=""` used to start an app that rejected every
 request with a 400, and `WEBSITE_ENABLE_DOCS=true` would silently mean
-_off_; now both fail fast at startup.
+_off_; now both fail fast at startup. `log_format` is typed as the
+`LogFormat` enum instead, so the only place it can be wrong is on the way
+in from the environment, and `from_env` is where that is caught.
 
 `Settings.from_env()` accepts an explicit mapping so tests can exercise
 parsing without touching `os.environ`. Defaults are production-safe:
-docs off, localhost-only hosts, 1 MB body cap.
+docs off, localhost-only hosts, 1 MB body cap, human-readable logs (the
+image opts into JSON, see "Distribution image").
 
 ## Security headers and CSP (`src/app/middleware.py`)
 
@@ -444,11 +447,39 @@ later setup reclaim its own loggers, and the access line loses the ID.
 The documented string entry point, `uvicorn app.main:app`, avoids that
 second problem but retains the `--log-config` tradeoff above.
 
-The format is human-readable rather than JSON: this is what a developer
-tails locally, and a blueprint should not presume a log pipeline.
-Swapping in a JSON formatter is a change to `LOG_FORMAT` and the
-formatter class beside it - the ID reaches the record either way,
-because `RequestIDFilter` is what puts it there. The same seam is where
+**The rendering is a setting, the schema is code.** `LOG_FORMAT` picks
+`text` (the code default: what a developer tails locally, and a blueprint
+should not presume a log pipeline) or `json` (one object per line, which
+is what the distribution image's environment selects - see "Distribution
+image" below). Picking is all it does: both renderings carry the same
+fields, the correlation ID included, because `RequestIDFilter` puts it on
+the record before either formatter sees it.
+
+Splitting it that way is deliberate. Every deployment with an aggregator
+in front of it wants JSON, so leaving that as an edit to a module
+constant meant every project derived from this template making the same
+edit, in its own way, in a template-owned file - the merge conflict on
+the next template update that a standard template exists to avoid. What
+stays in code is the field set: `TEXT_LOG_FORMAT` and `JSON_LOG_FIELDS`
+in `src/app/observability.py` are this app's log schema, the thing a
+dashboard and an alert are written against, and a schema belongs in
+version control rather than in a container's environment. They are also
+the wrong shape for an environment variable - a `%`-format string is code
+that fails at log time instead of at boot, and the JSON field set is a
+mapping with no sane flat encoding. Rename the JSON keys to a house
+convention (ECS's `log.level`, Google Cloud's `severity`) by editing that
+one mapping.
+
+`JSON_LOG_FIELDS` is an allowlist rather than "every attribute of the
+record": the keys are a contract with whatever parses the lines, so
+widening the schema is a deliberate edit there and no `extra=` at a call
+site can rename or add a field from a distance. `exc_info` and
+`stack_info` are appended outside it, since both are absent from most
+records and only `logging.Formatter` knows how to render them - dropping
+them would ship uvicorn's "Exception in ASGI application" with the cause
+gone, which is the one record the correlation ID exists for. Timestamps
+are RFC 3339 in UTC, so records from replicas in different zones order
+against each other. The same seam is where
 OpenTelemetry would go: `bind_request_id` is the one place that decides
 what a request is correlated by, so parsing `traceparent` into a real
 trace context means changing that function, not the middleware.
@@ -585,6 +616,16 @@ project-specific configuration translation layer.
 Setting `ENTRYPOINT` also clears the `python3` `CMD` inherited from the
 base image, so nothing declares a `CMD` here; `docker run --entrypoint sh`
 is how you run something else.
+
+Two non-`UVICORN_*` values sit beside them, both because a container's
+stdout is read by a machine and not by the person who started it:
+`PYTHONUNBUFFERED=1`, so a SIGKILL cannot take an 8 KB pipe buffer of log
+lines with it, and `LOG_FORMAT=json`, so the aggregator in front of the
+deployment gets structured records. Shipping the JSON choice as image
+environment rather than as the code default is what keeps a derived
+project from editing a template-owned file to get it (see "Request
+correlation" above); `docker run -e LOG_FORMAT=text` reads `docker logs`
+by hand.
 
 `tests/test_reverse_proxy_config.py` covers both halves of this, the dev
 topology and the image's, and the image's behaviorally: there is no Docker in

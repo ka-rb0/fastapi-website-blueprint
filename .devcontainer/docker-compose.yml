@@ -41,6 +41,7 @@ services:
       # Don't write .pyc files (__pycache__ directories).
       PYTHONDONTWRITEBYTECODE: 1
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-text}
       DATA_PATH: ${DATA_PATH}
       # Native server settings for the direct development listener. Proxy-only
       # settings belong to the separate proxy-backend service below, so no
@@ -88,6 +89,7 @@ services:
       PYTHONPATH: /workspace/src
       PYTHONDONTWRITEBYTECODE: 1
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
       UVICORN_HOST: 0.0.0.0
       UVICORN_PORT: ${WEBSITE_PROXY_BACKEND_PORT:?set it in .devcontainer/.env, see .env.example}
       UVICORN_RELOAD: "true"

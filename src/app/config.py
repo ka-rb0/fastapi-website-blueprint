@@ -5,6 +5,8 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from .observability import LogFormat
+
 DEFAULT_MAX_BODY_BYTES = 1_000_000
 DEFAULT_TRUSTED_HOSTS = ("localhost", "127.0.0.1")
 
@@ -24,6 +26,13 @@ class Settings:
     # boot and read at the entry point. See "Request correlation" and
     # "Lifespan" in docs/ARCHITECTURE.md.
     log_level: str = "INFO"
+    # Applied by the same owner, for the same reason. Text is the code default
+    # because that is what a developer tails; the distribution image sets
+    # LOG_FORMAT=json in its environment, so production ships structured logs
+    # without this file - or any file - being edited downstream. Typed as the
+    # enum rather than a string, so the only validation needed is on the way
+    # in from the environment (from_env below).
+    log_format: LogFormat = LogFormat.TEXT
 
     def __post_init__(self) -> None:
         """Normalize human-entered values and reject unsafe configuration."""
@@ -70,6 +79,17 @@ class Settings:
                 f"WEBSITE_ENABLE_DOCS must be '1' (on) or '0'/unset (off),"
                 f" got {raw_docs_enabled!r}"
             )
+        # Case-folded like LOG_LEVEL, and refused rather than silently falling
+        # back to text: a typo that quietly un-structures production's logs
+        # would only be discovered by the dashboard that stopped matching.
+        raw_log_format = values.get("LOG_FORMAT", LogFormat.TEXT)
+        try:
+            log_format = LogFormat(raw_log_format.lower())
+        except ValueError:
+            raise ValueError(
+                f"LOG_FORMAT must be one of {', '.join(LogFormat)},"
+                f" got {raw_log_format!r}"
+            ) from None
         return cls(
             docs_enabled=raw_docs_enabled == "1",
             trusted_hosts=tuple(
@@ -79,4 +99,5 @@ class Settings:
             ),
             max_body_bytes=max_body_bytes,
             log_level=values.get("LOG_LEVEL", "INFO"),
+            log_format=log_format,
         )

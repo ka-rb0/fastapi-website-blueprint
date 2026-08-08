@@ -26,6 +26,11 @@ dark themes.
 - Example API round trip: the "shout" form posts JSON to `/api/shout`
   (pydantic-validated) and renders the uppercased reply - copy this shape
   for real endpoints.
+- Orchestrator probes that keep liveness and readiness apart: `/livez`
+  (failing means _restart me_), `/readyz` (failing means _stop routing to
+  me_) and `/healthz` as the legacy alias. Both decisions get their own
+  route, so the dependency check you add later lands on the one wired to
+  de-routing rather than the one wired to a restart.
 - API tests plus Playwright E2E tests against a live uvicorn server.
 - A development-only Caddy sidecar for exercising local HTTPS, forwarded
   headers, and a stripped URL prefix against a second reload-enabled Uvicorn

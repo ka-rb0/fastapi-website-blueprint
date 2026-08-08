@@ -165,7 +165,7 @@ gh attestation verify oci://ghcr.io/<owner>/<repo>:latest -R <owner>/<repo> \
 
 `publish.yml` does not just produce these and hope. Its `verify` job pulls the
 published digest back out of the registry, runs both verifications, boots the
-container and probes `/api/health` - so a push that publishes an unbootable or
+container and probes `/readyz` - so a push that publishes an unbootable or
 unverifiable image goes red here instead of in a deployment.
 
 Because the workflow also pushes both attestations to GHCR beside the image,
@@ -251,7 +251,7 @@ cannot get either right on its own:
 
 - `WEBSITE_TRUSTED_HOSTS` - derived from the ingress FQDN **plus any bound
   custom domains**, so adding a domain does not take the site down on the next
-  release. Unset, every route except `/api/health` answers 400.
+  release. Unset, every route except the probes answers 400.
 - `UVICORN_FORWARDED_ALLOW_IPS=*` - Container Apps puts an Envoy ingress in
   front of the container, and it is never loopback, so the image's `127.0.0.1`
   default can never match it. [QUICKSTART.md](QUICKSTART.md) argues against
@@ -266,9 +266,9 @@ Swagger UI stays off in production.
 
 ### It is not done until the site answers
 
-After the revision reports `Running`, the job probes both `/api/health` **and**
-the homepage. The health route alone would prove nothing about configuration -
-it is the one path exempt from the Host allowlist, so it returns 200 even when
+After the revision reports `Running`, the job probes both `/readyz` **and**
+the homepage. The probe alone would prove nothing about configuration -
+it is exempt from the Host allowlist, so it returns 200 even when
 `WEBSITE_TRUSTED_HOSTS` is wrong and every real page returns 400. That is the
 most likely way this deployment breaks, and the homepage probe is what catches
 it.

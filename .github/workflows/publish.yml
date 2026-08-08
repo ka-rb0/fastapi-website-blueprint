@@ -250,7 +250,7 @@ jobs:
   # Closes the loop: everything above proves the build succeeded, nothing above
   # proves the artifact is usable. This job throws away the build context and
   # approaches the registry the way a consumer would - pull the digest, verify
-  # both signatures, boot the container, hit the health endpoint. A push that
+  # both signatures, boot the container, hit the readiness probe. A push that
   # publishes an unbootable or unverifiable image fails here rather than in
   # somebody's deployment.
   #
@@ -303,7 +303,7 @@ jobs:
       # unprivileged user would all pass CI and fail only at `docker run`.
       # 127.0.0.1 is in the app's default trusted hosts, so no
       # WEBSITE_TRUSTED_HOSTS is needed for a local probe.
-      - name: Boot the published image and probe /api/health
+      - name: Boot the published image and probe /readyz
         env:
           IMAGE_REF: ${{ needs.publish.outputs.image }}@${{ needs.publish.outputs.digest }}
         run: |
@@ -312,14 +312,14 @@ jobs:
           # Poll rather than sleep a fixed interval: uvicorn is usually up in
           # under a second, and a hung start should fail fast with the logs.
           for _ in $(seq 30); do
-            if curl -fsS --max-time 2 http://127.0.0.1:8000/api/health; then
+            if curl -fsS --max-time 2 http://127.0.0.1:8000/readyz; then
               echo "::notice::Published image booted and reported healthy."
               docker rm --force smoke >/dev/null
               exit 0
             fi
             sleep 1
           done
-          echo "::error::The published image never answered /api/health."
+          echo "::error::The published image never answered /readyz."
           docker logs smoke || true
           docker rm --force smoke >/dev/null
           exit 1
@@ -479,7 +479,7 @@ jobs:
       # cannot get right on its own and claims nothing else:
       #
       #   WEBSITE_TRUSTED_HOSTS - unset, the image trusts only localhost and
-      #     127.0.0.1, and every route except /api/health answers 400.
+      #     127.0.0.1, and every route except the probes answers 400.
       #
       #   UVICORN_FORWARDED_ALLOW_IPS - the image ships 127.0.0.1, and the
       #     Envoy ingress in front of this container is never loopback, so the
@@ -542,8 +542,8 @@ jobs:
           exit 1
       # The deploy is not done until the public address serves the new image.
       #
-      # /api/health on its own would not prove that: it is the one route
-      # exempt from the Host allowlist, so it answers 200 even when
+      # /readyz on its own would not prove that: the probe routes are
+      # exempt from the Host allowlist, so they answer 200 even when
       # WEBSITE_TRUSTED_HOSTS is wrong and every real page returns 400 - the
       # single most likely way this deployment breaks. Probing the homepage
       # too is what actually covers it, and it exercises the template render
@@ -553,7 +553,7 @@ jobs:
           FQDN: ${{ steps.target.outputs.fqdn }}
         run: |
           set -euo pipefail
-          for path in /api/health /; do
+          for path in /readyz /; do
             url="https://${FQDN}${path}"
             for attempt in $(seq 20); do
               code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$url" || echo 000)
@@ -562,7 +562,7 @@ jobs:
                 break
               fi
               if [ "$attempt" = "20" ]; then
-                echo "::error::${url} answered ${code}, not 200. A 400 here with a healthy /api/health means WEBSITE_TRUSTED_HOSTS does not cover ${FQDN}."
+                echo "::error::${url} answered ${code}, not 200. A 400 here with a healthy /readyz means WEBSITE_TRUSTED_HOSTS does not cover ${FQDN}."
                 exit 1
               fi
               sleep 3

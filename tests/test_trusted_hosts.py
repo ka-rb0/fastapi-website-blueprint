@@ -18,7 +18,8 @@ import urllib.request
 import pytest
 
 from app.middleware import SECURITY_HEADERS
-from app.routers import HEALTH_PATH
+from app.routers import PROBE_PATHS
+from app.routers.probes import LIVENESS_PATH
 
 from .helpers import emitted_urls
 
@@ -114,46 +115,51 @@ def test_configured_allowlist_replaces_default(trusted_hosts_server: str) -> Non
     assert excinfo.value.code == 400
 
 
-def test_health_answers_a_probe_the_allowlist_cannot_name(
-    trusted_hosts_server: str,
+@pytest.mark.parametrize("path", PROBE_PATHS)
+def test_probes_answer_a_host_the_allowlist_cannot_name(
+    trusted_hosts_server: str, path: str
 ) -> None:
     """
-    The health route answers whatever Host a probe sends.
+    Every probe route answers whatever Host a probe sends.
 
     PROBE_HOST plays a Kubernetes httpGet probe, which addresses the pod by
     its own IP: an address assigned at scheduling time, so no
     WEBSITE_TRUSTED_HOSTS value could contain it and every pod would fail its
-    liveness check into CrashLoopBackOff. The route is exempt from the
-    allowlist instead (see HostValidationMiddleware) - it can be, because it
-    reflects nothing of the request back.
+    liveness check into CrashLoopBackOff. The routes are exempt from the
+    allowlist instead (see HostValidationMiddleware) - they can be, because
+    they reflect nothing of the request back.
+
+    Parametrized over the whole tuple because the exemption is granted to the
+    whole tuple: a route added to it without this property would be the leak.
     """
-    request = _get_with_host(f"{trusted_hosts_server}{HEALTH_PATH}", PROBE_HOST)
+    request = _get_with_host(f"{trusted_hosts_server}{path}", PROBE_HOST)
     with urllib.request.urlopen(request, timeout=5) as resp:
         assert resp.status == 200
         assert json.loads(resp.read()) == {"status": "ok"}
 
 
-def test_health_exemption_survives_a_root_path(prefixed_server: str) -> None:
+@pytest.mark.parametrize("path", PROBE_PATHS)
+def test_probe_exemption_survives_a_root_path(prefixed_server: str, path: str) -> None:
     """
-    The probe still reaches the health route when the app runs under a prefix.
+    The probes still answer when the app runs under a prefix.
 
     uvicorn's --root-path folds the prefix into scope["path"], so an
-    exemption compared against a bare "/api/health" would silently stop
-    applying behind exactly the reverse proxy that makes the probe necessary.
-    The request goes to the unprefixed path, as a probe addressing the
-    container directly sends it.
+    exemption compared against a bare "/livez" would silently stop applying
+    behind exactly the reverse proxy that makes the probe necessary. The
+    request goes to the unprefixed path, as a probe addressing the container
+    directly sends it.
     """
-    request = _get_with_host(f"{prefixed_server}{HEALTH_PATH}", PROBE_HOST)
+    request = _get_with_host(f"{prefixed_server}{path}", PROBE_HOST)
     with urllib.request.urlopen(request, timeout=5) as resp:
         assert resp.status == 200
 
 
-@pytest.mark.parametrize("path", ["/", "/api/shout", f"{HEALTH_PATH}/"])
-def test_the_exemption_reaches_no_further_than_the_health_route(
+@pytest.mark.parametrize("path", ["/", "/api/shout", f"{LIVENESS_PATH}/"])
+def test_the_exemption_reaches_no_further_than_the_probe_routes(
     trusted_hosts_server: str, path: str
 ) -> None:
     """
-    Every other path - including the health route's trailing-slash form - is guarded.
+    Every other path - including a probe's trailing-slash form - is guarded.
 
     The trailing slash is the case the exact comparison buys: normalizing the
     path before matching would exempt a request the router answers with a

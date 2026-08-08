@@ -13,7 +13,7 @@ import ipaddress
 import os
 import re
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -215,7 +215,9 @@ def test_development_and_distribution_use_native_uvicorn_settings() -> None:
 
 
 @contextmanager
-def _running_entrypoint(port: int, *extra_args: str, **overrides: str) -> Iterator[str]:
+def _running_entrypoint(
+    port: int, *extra_args: str, **overrides: str
+) -> Generator[str]:
     """
     Run the distribution image's entrypoint locally, as Docker would run it.
 

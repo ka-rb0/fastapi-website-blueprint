@@ -25,6 +25,7 @@ from app.observability import (
     bind_request_id,
     get_request_id,
 )
+from app.routers.probes import LIVENESS_PATH
 
 from .conftest import next_test_port, run_server
 
@@ -57,13 +58,13 @@ def _request_id_of(
 
 
 def test_a_request_without_an_id_is_given_one(server: str) -> None:
-    assert MINTED_ID.fullmatch(_request_id_of(f"{server}/api/health"))
+    assert MINTED_ID.fullmatch(_request_id_of(f"{server}{LIVENESS_PATH}"))
 
 
 def test_each_request_gets_its_own_id(server: str) -> None:
     """Two requests are two traces - an ID nobody can tell apart is no ID."""
-    first = _request_id_of(f"{server}/api/health")
-    second = _request_id_of(f"{server}/api/health")
+    first = _request_id_of(f"{server}{LIVENESS_PATH}")
+    second = _request_id_of(f"{server}{LIVENESS_PATH}")
     assert first != second
 
 
@@ -75,7 +76,7 @@ def test_a_usable_inbound_id_is_kept(server: str) -> None:
     debugging its own bug report) picks the ID, and this service files its
     logs under the same one instead of starting a second, unlinkable trace.
     """
-    assert _request_id_of(f"{server}/api/health", sent="caller-chosen-id") == (
+    assert _request_id_of(f"{server}{LIVENESS_PATH}", sent="caller-chosen-id") == (
         "caller-chosen-id"
     )
 
@@ -100,7 +101,7 @@ def test_an_unusable_inbound_id_is_replaced_not_rejected(
     the other wrong answer, so the assertion pins both halves - the response
     carries a minted ID, and it is not what was sent.
     """
-    request_id = _request_id_of(f"{server}/api/health", sent=unusable)
+    request_id = _request_id_of(f"{server}{LIVENESS_PATH}", sent=unusable)
     assert request_id != unusable, why
     assert MINTED_ID.fullmatch(request_id), why
 
@@ -311,14 +312,14 @@ def test_the_log_stream_carries_the_id_of_the_request_it_describes(
     ):
         urllib.request.urlopen(
             urllib.request.Request(
-                f"{base}/api/health", headers={REQUEST_ID_HEADER: "traced-id"}
+                f"{base}{LIVENESS_PATH}", headers={REQUEST_ID_HEADER: "traced-id"}
             ),
             timeout=5,
         ).close()
     log = log_path.read_text()
 
     assert re.search(
-        r'INFO uvicorn\.access \[traced-id\] .* "GET /api/health HTTP/1\.1" 200', log
+        r'INFO uvicorn\.access \[traced-id\] .* "GET /livez HTTP/1\.1" 200', log
     ), f"no access line correlated to the request that produced it:\n{log}"
     assert re.search(
         rf"INFO app\.lifecycle \[{NO_REQUEST_ID}\] Serving static files", log

@@ -1,7 +1,7 @@
 """Application startup and shutdown lifecycle."""
 
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
 from fastapi import FastAPI
@@ -24,7 +24,7 @@ def create_lifespan(
     """
 
     @asynccontextmanager
-    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
         # Deliberately no logging configuration here: logging is deployment
         # policy, owned by the process entry point (app.main, or an embedding
         # host's own setup) - a lifespan that reconfigured it would run inside

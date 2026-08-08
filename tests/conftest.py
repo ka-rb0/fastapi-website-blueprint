@@ -15,12 +15,14 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import IO
 
 import pytest
+
+from app.routers.probes import READINESS_PATH
 
 SRC_DIR = Path(__file__).parent.parent / "src"
 # The inclusive port range every live server in the suite draws from, one
@@ -123,7 +125,7 @@ def start_server_command(
     output: IO[bytes] | None = None,
 ) -> subprocess.Popen[bytes]:
     """
-    Run `argv` and return it once it answers /api/health on `port`.
+    Run `argv` and return it once it answers /readyz on `port`.
 
     The argv is a parameter rather than built here so a test can start a
     server this suite did not compose - the distribution image's entrypoint
@@ -137,18 +139,20 @@ def start_server_command(
         stdout=output,
         stderr=subprocess.STDOUT if output is not None else None,
     )
-    health_url = f"http://127.0.0.1:{port}/api/health"
+    # Readiness, not liveness: "can this server take traffic yet" is the
+    # question a fixture waiting to send some is actually asking.
+    readiness_url = f"http://127.0.0.1:{port}{READINESS_PATH}"
     deadline = time.monotonic() + 15
     while True:
         try:
-            with urllib.request.urlopen(health_url, timeout=1):
+            with urllib.request.urlopen(readiness_url, timeout=1):
                 return proc
         except urllib.error.HTTPError as err:
-            # The server is up but health failed - fail fast with the real
+            # The server is up but the probe failed - fail fast with the real
             # status instead of spinning until the deadline. (HTTPError is
             # an OSError subclass, so this except must come first.)
             _kill_and_reap(proc)
-            raise RuntimeError(f"/api/health returned HTTP {err.code}") from err
+            raise RuntimeError(f"{READINESS_PATH} returned HTTP {err.code}") from err
         except OSError as err:
             if proc.poll() is not None:
                 # No reap needed: the poll() that detected the exit did it.
@@ -167,7 +171,7 @@ def run_server(
     *,
     app_target: str = "app.main:app",
     output: IO[bytes] | None = None,
-) -> Iterator[str]:
+) -> Generator[str]:
     """
     Start uvicorn on `port` with exactly `env`, yield its base URL when healthy.
 
@@ -188,7 +192,7 @@ def run_server_command(
     *,
     cwd: Path = SRC_DIR,
     output: IO[bytes] | None = None,
-) -> Iterator[str]:
+) -> Generator[str]:
     """Run `argv` (see start_server_command) and yield its base URL while healthy."""
     with _serving(
         start_server_command(argv, port, env, cwd=cwd, output=output), port
@@ -197,7 +201,7 @@ def run_server_command(
 
 
 @contextmanager
-def _serving(proc: subprocess.Popen[bytes], port: int) -> Iterator[str]:
+def _serving(proc: subprocess.Popen[bytes], port: int) -> Generator[str]:
     """Yield the base URL of an already-healthy `proc`, then stop and reap it."""
     try:
         yield f"http://127.0.0.1:{port}"
@@ -215,7 +219,7 @@ def _serving(proc: subprocess.Popen[bytes], port: int) -> Iterator[str]:
 
 
 @pytest.fixture(scope="session")
-def server() -> Iterator[str]:
+def server() -> Generator[str]:
     """Start the server most tests hit, once per session."""
     # Docs on, explicitly: the suite tests the /docs page and its CSP
     # exception, so it must not depend on the shell's environment. And
@@ -228,7 +232,7 @@ def server() -> Iterator[str]:
 
 
 @pytest.fixture(scope="session")
-def prefixed_server() -> Iterator[str]:
+def prefixed_server() -> Generator[str]:
     """
     Start a server deployed under the URL prefix /prefix.
 
@@ -252,15 +256,15 @@ def prefixed_server() -> Iterator[str]:
 
 
 @pytest.fixture(scope="session")
-def trusted_hosts_server() -> Iterator[str]:
+def trusted_hosts_server() -> Generator[str]:
     """
     Start a server with an explicit WEBSITE_TRUSTED_HOSTS allowlist.
 
     site.example stands in for a deployment's public host name (the Host a
     reverse proxy forwards) and is the whole allowlist - no local name beside
     it, exactly as a production deployment would set it. The readiness poll
-    in start_server still reaches /api/health over the loopback, because that
-    route is exempt from the allowlist (see HostValidationMiddleware); a
+    in start_server still reaches /readyz over the loopback, because the probe
+    routes are exempt from the allowlist (see HostValidationMiddleware); a
     regression there fails this fixture with the status the poll got, which
     is also what would mark the distribution image's HEALTHCHECK unhealthy.
     """

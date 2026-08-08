@@ -139,7 +139,7 @@ class HostValidationMiddleware:
     the ``"*"`` opt-out, the 400 - and this wrapper only decides which
     requests reach it. The exemption exists for orchestrator probes: a
     Kubernetes ``httpGet`` probe sends the pod's own IP as ``Host``, an
-    address no allowlist can name in advance, so a guarded health route makes
+    address no allowlist can name in advance, so a guarded probe route makes
     every deployment fail its own liveness check and restart forever. A path
     listed here must therefore answer without ever putting ``Host`` into a
     response - see "Trusted hosts" in docs/ARCHITECTURE.md.
@@ -147,8 +147,8 @@ class HostValidationMiddleware:
     Paths are compared exactly, after ``root_path`` is removed and
     *without* normalizing - the opposite of the CSP check above, because here
     normalizing would *widen* the exemption rather than narrow a relaxation.
-    ``/api/health/`` normalizes onto the exempt path but is not routed to the
-    health endpoint: the router answers it with a redirect whose ``Location``
+    ``/livez/`` normalizes onto the exempt path but is not routed to the
+    liveness endpoint: the router answers it with a redirect whose ``Location``
     is built from the very ``Host`` header this guard exists to distrust.
     """
 

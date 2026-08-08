@@ -128,7 +128,7 @@ ENV UVICORN_PORT=8000
 # Deployments must also set WEBSITE_TRUSTED_HOSTS to the site's public host
 # name(s): the code's default (see Settings.trusted_hosts in
 # src/app/config.py) trusts only local names, so real traffic gets a 400
-# until it is set. The health route is exempt from that check, so the
+# until it is set. The probe routes are exempt from that check, so the
 # HEALTHCHECK below and an orchestrator's probes keep working whatever the
 # allowlist says (see "Trusted hosts" in docs/ARCHITECTURE.md).
 # EXPOSE is build-time metadata only; a run-time UVICORN_PORT
@@ -200,9 +200,16 @@ ENV UVICORN_SERVER_HEADER=false
 RUN useradd --system --no-create-home app
 USER app
 
-# The base stage has no curl/wget, so probe /api/health with the stdlib.
+# /readyz rather than /livez: what Docker's health state is actually consumed
+# for is "may this container be used" - Compose gates `depends_on:
+# service_healthy` on it, and a load balancer reads it the same way - which is
+# the readiness question. The two answer identically today (see
+# src/app/routers/probes.py); the choice decides which one a dependency check
+# added later would drive. The exception is Swarm, which replaces an unhealthy
+# task, i.e. treats this as liveness - deployments there should point this at
+# /livez instead. The base stage has no curl/wget, so probe with the stdlib.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-  CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ['UVICORN_PORT'] + '/api/health', timeout=4)"
+  CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ['UVICORN_PORT'] + '/readyz', timeout=4)"
 
 # ENTRYPOINT rather than CMD, so `docker run <image> --root-path /shop` (or a
 # Kubernetes `args:`) appends Uvicorn flags; command-line values take

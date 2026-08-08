@@ -6,6 +6,19 @@ MIN_SHOUT_LENGTH = 1
 MAX_SHOUT_LENGTH = 1_000
 
 
+class ProbeStatus(BaseModel):
+    """
+    Reply returned by the probe routes in ``app.routers.probes``.
+
+    A model rather than ``dict[str, str]`` so the generated schema names the
+    field instead of describing "an object of strings": orchestrators decide on
+    the status code alone, but the body is documented surface that humans and
+    dashboards read.
+    """
+
+    status: str
+
+
 class ShoutPayload(BaseModel):
     """Body accepted by ``POST /api/shout``."""
 

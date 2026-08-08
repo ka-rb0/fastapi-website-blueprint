@@ -9,6 +9,7 @@ from starlette.types import ASGIApp, Message, Scope
 from app.config import DEFAULT_MAX_BODY_BYTES, DEFAULT_TRUSTED_HOSTS, Settings
 from app.factory import create_app
 from app.middleware import DOCS_CSP, SECURITY_HEADERS
+from app.observability import LogFormat
 from tests.helpers import body_limited_app, framework_app, security_headers_app
 
 
@@ -131,6 +132,7 @@ def test_settings_load_and_normalize_environment_values() -> None:
             "WEBSITE_TRUSTED_HOSTS": " site.example, *.internal.example ",
             "WEBSITE_MAX_BODY_BYTES": "4096",
             "LOG_LEVEL": "debug",
+            "LOG_FORMAT": "JSON",
         }
     )
 
@@ -139,6 +141,7 @@ def test_settings_load_and_normalize_environment_values() -> None:
         trusted_hosts=("site.example", "*.internal.example"),
         max_body_bytes=4_096,
         log_level="DEBUG",
+        log_format=LogFormat.JSON,
     )
 
 
@@ -153,6 +156,18 @@ def test_from_env_names_the_variable_for_a_non_integer_body_cap() -> None:
     """The parse error names WEBSITE_MAX_BODY_BYTES, not just "invalid literal"."""
     with pytest.raises(ValueError, match=r"WEBSITE_MAX_BODY_BYTES.*'1MB'"):
         Settings.from_env({"WEBSITE_MAX_BODY_BYTES": "1MB"})
+
+
+def test_from_env_rejects_an_unknown_log_format() -> None:
+    """
+    A misspelled rendering refuses to boot instead of falling back to text.
+
+    Silently defaulting would ship human-readable lines to a pipeline that
+    parses JSON, and the first sign of it would be a dashboard that quietly
+    stopped matching - long after the deploy that caused it.
+    """
+    with pytest.raises(ValueError, match=r"LOG_FORMAT.*'structured'"):
+        Settings.from_env({"LOG_FORMAT": "structured"})
 
 
 @pytest.mark.parametrize("value", ["true", "yes", "on"])

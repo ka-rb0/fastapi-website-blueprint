@@ -16,7 +16,7 @@ settings = Settings.from_env()
 # logging when its Config is constructed and imports this module afterwards.
 # A host that never imports app.main keeps its own logging, and can opt in by
 # calling configure_logging itself (see docs/ARCHITECTURE.md).
-configure_logging(settings.log_level)
+configure_logging(settings.log_level, settings.log_format)
 
 app = create_app(settings)
 

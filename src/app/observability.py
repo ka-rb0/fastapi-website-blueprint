@@ -1,12 +1,15 @@
 """Request correlation: one ID per request, on every response and log record."""
 
+import json
 import logging
 import logging.config
 import re
+import time
 import uuid
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
+from enum import StrEnum
 
 REQUEST_ID_HEADER = "X-Request-ID"
 
@@ -25,11 +28,35 @@ NO_REQUEST_ID = "-"
 # 32-character hex string, a 55-character W3C `traceparent`).
 _ACCEPTED_REQUEST_ID = re.compile(r"[\x21-\x7e]{1,64}")
 
-# Human-readable rather than JSON: this is what a developer tails locally, and
-# a blueprint should not presume a log pipeline. Swapping in a JSON formatter
-# is a change to this one string plus the formatter class below it - the ID
-# reaches the record either way, because the filter puts it there.
-LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s [%(request_id)s] %(message)s"
+
+class LogFormat(StrEnum):
+    """Which rendering ``configure_logging`` installs, chosen by ``LOG_FORMAT``."""
+
+    # For a human tailing a terminal: the local default, because a blueprint
+    # should not presume a log pipeline exists.
+    TEXT = "text"
+    # One JSON object per line, for the aggregator every deployment ends up
+    # with: the distribution image ships this (see .devcontainer/Dockerfile).
+    JSON = "json"
+
+
+# The correlation ID reaches the record either way, because RequestIDFilter is what
+# puts it there.
+TEXT_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s [%(request_id)s] %(message)s"
+
+# JSON key -> LogRecord attribute, in the order the object is written. An
+# allowlist rather than "every attribute of the record": the keys are a
+# contract with whatever parses these lines, so adding a field is a deliberate
+# edit here and no `extra=` at some call site can widen or rename the schema
+# from a distance. Rename the keys to match a house convention (ECS's
+# `log.level`, Google Cloud's `severity`) by editing this mapping alone.
+JSON_LOG_FIELDS: Mapping[str, str] = {
+    "time": "asctime",
+    "level": "levelname",
+    "logger": "name",
+    "request_id": "request_id",
+    "message": "message",
+}
 
 _request_id: ContextVar[str] = ContextVar("request_id", default=NO_REQUEST_ID)
 
@@ -88,7 +115,47 @@ class RequestIDFilter(logging.Filter):
         return True
 
 
-def configure_logging(level: str) -> None:
+class JsonLogFormatter(logging.Formatter):
+    """Render each record as one line of JSON, the fields JSON_LOG_FIELDS names."""
+
+    # RFC 3339 in UTC, which is what a log pipeline can order records by
+    # across hosts - the base class's local time with a "," before the
+    # milliseconds is neither. Three class attributes rather than an override
+    # of formatTime, because that is the seam logging.Formatter provides for
+    # exactly this (Python 3.9+). staticmethod, because time.gmtime's optional
+    # argument makes a plain assignment ambiguous to a type checker.
+    converter = staticmethod(time.gmtime)
+    default_time_format = "%Y-%m-%dT%H:%M:%S"
+    default_msec_format = "%s.%03dZ"
+
+    def format(self, record: logging.LogRecord) -> str:
+        """Return the record as a JSON object on a single line."""
+        # Assigned onto the record, the way the base class does it: these two
+        # are derived, so they do not exist until something computes them, and
+        # a second handler formatting the same record reuses the work.
+        record.message = record.getMessage()
+        record.asctime = self.formatTime(record, self.datefmt)
+        payload = {
+            key: getattr(record, attribute)
+            for key, attribute in JSON_LOG_FIELDS.items()
+            if hasattr(record, attribute)
+        }
+        # Appended rather than mapped, because both are absent from most
+        # records and only the base class knows how to render them. Without
+        # this, the traceback uvicorn logs for a failed request - the record
+        # the correlation ID exists for - would reach the pipeline as a bare
+        # "Exception in ASGI application" with the cause dropped.
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        if record.stack_info:
+            payload["stack"] = self.formatStack(record.stack_info)
+        # default=str so an unserializable value degrades to its repr instead
+        # of raising inside the handler, where the record would be lost and
+        # only logging's own "--- Logging error ---" would remain.
+        return json.dumps(payload, default=str)
+
+
+def configure_logging(level: str, log_format: LogFormat = LogFormat.TEXT) -> None:
     """
     Route every logger in the process through one request-ID-aware handler.
 
@@ -100,6 +167,10 @@ def configure_logging(level: str) -> None:
     keeps app and access lines in one correctly ordered stream instead of two.
     Their levels become ``NOTSET`` so they inherit the configured root level:
     ``LOG_LEVEL`` then means what it says, uvicorn's hardcoded INFO included.
+
+    ``log_format`` picks the rendering, and only the rendering - every record
+    carries the same fields either way. It defaults to ``TEXT`` so a host that
+    opts into this setup with a level alone still gets readable output.
 
     Called when ``app.main`` is imported - the executable boundary, and the
     ordering that lets this replace uvicorn's setup, because uvicorn
@@ -115,7 +186,13 @@ def configure_logging(level: str) -> None:
             # must keep working; this reconfigures the process, not the world.
             "disable_existing_loggers": False,
             "filters": {"request_id": {"()": RequestIDFilter}},
-            "formatters": {"default": {"format": LOG_FORMAT}},
+            "formatters": {
+                "default": (
+                    {"format": TEXT_LOG_FORMAT}
+                    if log_format is LogFormat.TEXT
+                    else {"()": JsonLogFormatter}
+                )
+            },
             "handlers": {
                 "default": {
                     "class": "logging.StreamHandler",

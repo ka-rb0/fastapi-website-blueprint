@@ -118,6 +118,9 @@ ENV PYTHONPATH=/src
 # (docker exec, the HEALTHCHECK probe) logs promptly as well.
 ENV PYTHONUNBUFFERED=1
 
+# Override with `-e LOG_FORMAT=text` to read `docker logs` by hand.
+ENV LOG_FORMAT=json
+
 # Uvicorn's public environment interface is the distribution image's one
 # server-configuration contract. Keeping these as UVICORN_* values means the
 # image, the development proxy backend and a bare `uvicorn app.main:app` all

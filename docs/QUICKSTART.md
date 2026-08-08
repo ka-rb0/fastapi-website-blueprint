@@ -68,11 +68,22 @@ image; no second command is needed.
   rather than refused. Lines with no request behind them (startup, shutdown)
   show `[-]`. `LOG_LEVEL` sets the level for the app and uvicorn alike -
   access lines are INFO, so `WARNING` and up silences them too.
+- `LOG_FORMAT` picks how each line is rendered: `text` (the default here -
+  what you tail in a terminal) or `json`, one object per line for a log
+  pipeline. The distribution image sets `json`, so a deployment gets
+  structured logs without editing anything; set `LOG_FORMAT=json` in
+  `.devcontainer/.env` to see locally what your aggregator will receive, or
+  `docker run -e LOG_FORMAT=text` to read `docker logs` by hand. Both
+  renderings carry the same fields, request ID included. The fields
+  themselves stay in code - `TEXT_LOG_FORMAT` and `JSON_LOG_FIELDS` in
+  `src/app/observability.py` - because they are the log schema your
+  dashboards match on; edit them there to add or rename a field.
 - Importing `app.main` claims process-wide logging, so **the root and Uvicorn
   portions of `uvicorn --log-config` are silently overridden** when you serve
   `app.main:app`; explicitly named non-Uvicorn loggers may retain their
   configuration, potentially producing mixed output. Reshape the claimed logs
-  by editing `LOG_FORMAT` in `src/app/observability.py`, or, if the flag has to
+  with `LOG_FORMAT` (and the field constants beside it in
+  `src/app/observability.py`), or, if the flag has to
   win, serve your own entry point that calls `create_app` without importing
   `app.main` (see "Request correlation" in [ARCHITECTURE.md](ARCHITECTURE.md)).
 - `UVICORN_FORWARDED_ALLOW_IPS` is set to Caddy's pinned Compose-network

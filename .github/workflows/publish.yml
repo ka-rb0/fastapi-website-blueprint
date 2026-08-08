@@ -433,13 +433,41 @@ jobs:
             echo "::error::Active revision mode is ${mode}; this job assumes Single, where the new revision takes all traffic. Splitting traffic needs an explicit 'az containerapp ingress traffic set' step here."
             exit 1
           fi
+          # An internal ingress still gets an FQDN, but one that resolves only
+          # inside the environment's network - the probe at the end of this
+          # job would hang against it and the environment URL would point
+          # somewhere nobody can open.
+          if [ "$(jq -r '.external' <<<"$ingress")" != "true" ]; then
+            echo "::error::Ingress is internal; this job deploys a public site and probes it over the internet. Make it external, or drop the probe step and the environment URL."
+            exit 1
+          fi
+          # `jq -r` renders a JSON null as the four characters "null", so an
+          # absent FQDN would otherwise flow on as a real-looking value: the
+          # environment URL becomes https://null and the probe fails against
+          # a name that does not resolve. The host list built from it comes
+          # out empty instead, because join() renders null as nothing - and
+          # an empty WEBSITE_TRUSTED_HOSTS makes the app refuse to boot, so
+          # the run would fail several minutes later as a crash-looping
+          # revision, naming nothing that points back here. `// empty` turns
+          # both into an empty string this catches immediately.
+          fqdn=$(jq -r '.fqdn // empty' <<<"$ingress")
+          if [ -z "$fqdn" ]; then
+            echo "::error::Ingress reports no FQDN, so there is no address to trust or to probe. Check that ingress finished provisioning on ${CONTAINER_APP}."
+            exit 1
+          fi
           # Every name a visitor can reach the site by has to be in the app's
           # Host allowlist, or it answers 400 (see "Trusted hosts" in
           # docs/ARCHITECTURE.md). Deriving the list from the ingress means
           # binding a custom domain does not silently take the site down on
           # the next release. customDomains is null when none are bound.
-          fqdn=$(jq -r '.fqdn' <<<"$ingress")
-          hosts=$(jq -r '[.fqdn] + [(.customDomains // [])[].name] | join(",")' <<<"$ingress")
+          #
+          # The select() drops a null or empty custom-domain name rather than
+          # letting it reach the allowlist: the app strips empty entries
+          # itself, but a literal "null" would become a trusted host named
+          # null. Deliberately not `unique` - that sorts, which would move the
+          # FQDN out of first place in the log line for no gain, and a
+          # duplicate host is harmless to TrustedHostMiddleware anyway.
+          hosts=$(jq -r '[.fqdn] + [(.customDomains // [])[].name] | map(select(. != null and . != "")) | join(",")' <<<"$ingress")
           echo "fqdn=${fqdn}" >> "$GITHUB_OUTPUT"
           echo "hosts=${hosts}" >> "$GITHUB_OUTPUT"
           echo "::notice::Deploying to ${fqdn} (trusted hosts: ${hosts})"

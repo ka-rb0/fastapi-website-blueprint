@@ -10,7 +10,7 @@ from collections.abc import Iterator
 import pytest
 
 from app.config import Settings
-from app.middleware import DOCS_CSP, SECURITY_HEADERS
+from app.middleware import DOCS_COOP, DOCS_CSP, SECURITY_HEADERS
 from app.routers.probes import LIVENESS_PATH
 from app.schemas import MAX_SHOUT_LENGTH
 
@@ -203,17 +203,23 @@ def test_docs_page_served(server: str) -> None:
         assert '<div id="swagger-ui">' in resp.read().decode()
 
 
-def test_docs_gets_relaxed_csp(server: str) -> None:
+@pytest.mark.parametrize("path", ["/docs", "/docs/oauth2-redirect"])
+def test_docs_gets_relaxed_browser_policies(server: str, path: str) -> None:
     """
-    /docs responses carry DOCS_CSP; every other security header is unchanged.
+    /docs carries the two browser-policy exceptions it needs.
 
-    That the relaxation stays off all other paths is covered by
+    DOCS_CSP and an OAuth-compatible opener policy replace their strict
+    defaults. That the relaxation stays off all other paths is covered by
     test_security_headers above, which asserts the strict CSP exactly.
     """
-    with urllib.request.urlopen(f"{server}/docs", timeout=5) as resp:
+    with urllib.request.urlopen(f"{server}{path}", timeout=5) as resp:
         assert resp.headers["Content-Security-Policy"] == DOCS_CSP
+        assert resp.headers["Cross-Origin-Opener-Policy"] == DOCS_COOP
         for name, value in SECURITY_HEADERS.items():
-            if name != "Content-Security-Policy":
+            if name not in (
+                "Content-Security-Policy",
+                "Cross-Origin-Opener-Policy",
+            ):
                 assert resp.headers[name] == value
 
 
@@ -232,6 +238,10 @@ def test_docs_csp_not_leaked_via_dot_segments(server: str) -> None:
         assert "light-dark" in resp.read().decode()
         csp = resp.headers["Content-Security-Policy"]
         assert csp == SECURITY_HEADERS["Content-Security-Policy"]
+        assert (
+            resp.headers["Cross-Origin-Opener-Policy"]
+            == SECURITY_HEADERS["Cross-Origin-Opener-Policy"]
+        )
 
 
 def test_openapi_schema_served(server: str) -> None:

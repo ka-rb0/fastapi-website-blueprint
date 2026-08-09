@@ -52,6 +52,11 @@ image; no second command is needed.
   LAN? The phone addresses the site by this machine's LAN IP, so add that
   IP - not the phone's - or use `"*"` while developing (see
   `.devcontainer/.env.example`).
+  Entries are ASCII host names without a scheme, port or path; DNS names are
+  matched case-insensitively. Wildcards have the form `*.example.com` (or
+  `"*"` to disable the guard). Starlette's matcher does not currently support
+  IPv6 literals, so invalid or unsupported patterns fail at startup instead
+  of producing an allowlist that rejects every request.
 - Request bodies are capped at 1 MB with a 413 (`Settings.max_body_bytes` in
   `src/app/config.py`, overridable via `WEBSITE_MAX_BODY_BYTES`). The app
   rejects an oversized declared `Content-Length` before routing and counts

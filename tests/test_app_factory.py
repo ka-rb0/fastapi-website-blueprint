@@ -129,7 +129,7 @@ def test_settings_load_and_normalize_environment_values() -> None:
     settings = Settings.from_env(
         {
             "WEBSITE_ENABLE_DOCS": "1",
-            "WEBSITE_TRUSTED_HOSTS": " site.example, *.internal.example ",
+            "WEBSITE_TRUSTED_HOSTS": " SITE.example, *.Internal.Example ",
             "WEBSITE_MAX_BODY_BYTES": "4096",
             "LOG_LEVEL": "debug",
             "LOG_FORMAT": "JSON",
@@ -196,3 +196,23 @@ def test_settings_reject_invalid_values(
 ) -> None:
     with pytest.raises(ValueError, match=message):
         Settings(**overrides)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "trusted_host",
+    [
+        "foo*bar",
+        "*foo.example",
+        "*.",
+        "site.example:443",
+        "https://site.example",
+        "site.example/path",
+        "site example",
+        "site\x00example",
+        "[::1]",
+    ],
+)
+def test_settings_reject_invalid_trusted_host_patterns(trusted_host: str) -> None:
+    """Every accepted host pattern is safe for Starlette to match."""
+    with pytest.raises(ValueError, match=r"trusted_hosts/WEBSITE_TRUSTED_HOSTS"):
+        Settings(trusted_hosts=(trusted_host,))

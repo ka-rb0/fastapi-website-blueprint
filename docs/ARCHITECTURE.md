@@ -52,8 +52,9 @@ the finished app keeps even those 500s stamped and correlated.
 
 A frozen, slotted dataclass validated in `__post_init__`: an instance
 that exists is safe to build an app from. Invalid configuration
-(no trusted hosts after stripping blanks, non-positive body cap, unknown
-log level or log format, an unrecognized `WEBSITE_ENABLE_DOCS` value)
+(no trusted hosts after stripping blanks, a malformed host pattern,
+non-positive body cap, unknown log level or log format, an unrecognized
+`WEBSITE_ENABLE_DOCS` value)
 refuses to boot instead of producing a misbehaving server - e.g.
 `WEBSITE_TRUSTED_HOSTS=""` used to start an app that rejected every
 request with a 400, and `WEBSITE_ENABLE_DOCS=true` would silently mean
@@ -65,6 +66,15 @@ in from the environment, and `from_env` is where that is caught.
 parsing without touching `os.environ`. Defaults are production-safe:
 docs off, localhost-only hosts, 1 MB body cap, human-readable logs (the
 image opts into JSON, see "Distribution image").
+
+Trusted-host entries are lowercased and validated against Starlette's host
+pattern contract before the application exists: an exact ASCII host name,
+`*.example.com`, or the explicit `"*"` opt-out. Schemes, ports, paths,
+whitespace, IPv6 literals (unsupported by Starlette's current matcher) and
+malformed wildcards fail with a configuration error instead of surfacing as a
+late framework assertion or an allowlist that can never match. Incoming host
+names are lowercased before matching too; their optional request port remains
+available to redirects and URL generation.
 
 ## Security headers and CSP (`src/app/middleware.py`)
 
@@ -78,10 +88,11 @@ errors. Highlights of the individual choices:
 - No `Strict-Transport-Security` on purpose: HSTS belongs at the
   TLS-terminating reverse proxy - the app only ever speaks plain HTTP.
 - `X-Frame-Options` is the legacy complement of the CSP's
-  `frame-ancestors` for pre-CSP2 browsers; the `Cross-Origin-*` headers
-  deny window handles and cross-origin embedding (tab-nabbing, XS-Leaks,
-  Spectre-class side channels) before the app ever has authenticated
-  pages to protect.
+  `frame-ancestors` for pre-CSP2 browsers; by default, the `Cross-Origin-*`
+  headers deny window handles and cross-origin embedding (tab-nabbing,
+  XS-Leaks, Spectre-class side channels) before the app ever has
+  authenticated pages to protect. The docs' OAuth-specific exception is
+  described below.
 - `Referrer-Policy: strict-origin-when-cross-origin` is the modern
   browser default, made explicit for older browsers whose default
   (`no-referrer-when-downgrade`) leaks full URLs cross-origin.
@@ -89,7 +100,7 @@ errors. Highlights of the individual choices:
   the frontend uses none of them, and the opt-out means embedded content
   can't use them either.
 
-### The docs CSP exception
+### The docs browser-policy exceptions
 
 `DOCS_CSP` is **derived** from the strict policy with `.replace()`, never
 hand-written, so any directive not explicitly relaxed cannot drift -
@@ -118,6 +129,15 @@ before the prefix check: browsers resolve dot segments before sending,
 but raw clients need not, and `StaticFiles` serves the _normalized_
 path - a raw `/docs/../css/theme.css` is a real asset and must get the
 strict CSP, not the docs relaxation.
+
+The docs subtree also changes `Cross-Origin-Opener-Policy` from the
+site-wide `same-origin` to `same-origin-allow-popups`. Swagger UI's OAuth
+flow opens the identity provider on another origin, then returns to
+`/docs/oauth2-redirect`, whose script reads `window.opener` to deliver the
+authorization result. `same-origin` severs that relationship when the popup
+crosses origins; `same-origin-allow-popups` is the narrow policy intended for
+OAuth integrations. The same normalized subtree check scopes both exceptions,
+and tests assert that neither can leak through dot segments or `root_path`.
 
 ## `root_path` handling (`src/app/middleware.py`, `src/app/exceptions.py`)
 

@@ -11,6 +11,42 @@ DEFAULT_MAX_BODY_BYTES = 1_000_000
 DEFAULT_TRUSTED_HOSTS = ("localhost", "127.0.0.1")
 
 
+def _normalize_trusted_host(raw_host: str) -> str:
+    """Return one canonical Starlette host pattern or reject it."""
+    host = raw_host.strip().lower()
+    if not host:
+        return ""
+
+    # TrustedHostMiddleware compares host names, never origins or authorities:
+    # it strips a request's port before matching. Accepting one here would
+    # therefore create a configuration that boots but rejects every request.
+    # IPv6 literals contain colons too and are not supported by Starlette's
+    # current matcher, which splits the Host header on the first colon.
+    if (
+        not host.isascii()
+        or not host.isprintable()
+        or any(character.isspace() or character in ":/@?#\\[]" for character in host)
+    ):
+        raise ValueError(
+            "trusted_hosts/WEBSITE_TRUSTED_HOSTS entries must be ASCII host names "
+            f"without a scheme, port, path, or whitespace; got {raw_host!r}"
+        )
+
+    # Match TrustedHostMiddleware's public wildcard contract here instead of
+    # letting its assertion surface later, when Starlette first builds the
+    # middleware stack. A Settings instance is then genuinely safe to serve.
+    if (
+        "*" in host
+        and host != "*"
+        and (not host.startswith("*.") or host.count("*") != 1 or host == "*.")
+    ):
+        raise ValueError(
+            "trusted_hosts/WEBSITE_TRUSTED_HOSTS wildcard patterns must be '*' "
+            f"or start with '*.'; got {raw_host!r}"
+        )
+    return host
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Settings:
     """Validated, immutable settings for one application instance."""
@@ -37,7 +73,9 @@ class Settings:
     def __post_init__(self) -> None:
         """Normalize human-entered values and reject unsafe configuration."""
         trusted_hosts = tuple(
-            host.strip() for host in self.trusted_hosts if host.strip()
+            host
+            for raw_host in self.trusted_hosts
+            if (host := _normalize_trusted_host(raw_host))
         )
         if not trusted_hosts:
             raise ValueError("trusted_hosts must contain at least one host")

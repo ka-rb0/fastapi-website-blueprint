@@ -186,7 +186,7 @@ workflow with a floating action tag, an over-permissioned token.
 against ~18 supply-chain checks and files the results as code scanning alerts
 next to CodeQL's. Nothing to click; it runs from the checked-in workflow.
 
-Two things worth knowing:
+Three things worth knowing:
 
 - **Results are public.** `publish_results: true` sends the score to the
   OpenSSF API, which backs the score badge and the data
@@ -197,6 +197,23 @@ Two things worth knowing:
   classic PAT with `repo` scope as a secret, and a long-lived broadly-scoped
   token is a worse trade than one imprecise check. The workflow comment shows
   how to opt in if you disagree.
+- **`Fuzzing` scores zero on purpose**, and its alert is dismissed as
+  _risk accepted_ rather than fixed. The check credits OSS-Fuzz,
+  ClusterFuzzLite or OneFuzz; OSS-Fuzz only takes projects critical to global
+  infrastructure, and ClusterFuzzLite would add a Dockerfile, a build script,
+  fuzz targets and a corpus to a repo whose point is that you can read it end
+  to end. It would also find little: every byte a client controls is framed by
+  uvicorn and parsed by Starlette or Pydantic, and the only two first-party
+  parsers - the `Content-Length` reader in
+  [middleware.py](../src/app/middleware.py) and the request-ID guard in
+  [observability.py](../src/app/observability.py) - are short total functions
+  over bounded input, in a language where the failure mode is an uncaught
+  exception rather than memory corruption. What a fuzzer would have been for
+  is bought instead with Hypothesis, inside the normal suite: see the property
+  tests at [test_body_size_limit.py](../tests/test_body_size_limit.py)
+  and [test_request_id.py](../tests/test_request_id.py). Scorecard does not
+  credit Hypothesis, so this closes the risk without moving the score -
+  deliberately, because the score is not the thing worth optimizing.
 
 💰 Public repos only, on two counts: publishing results requires a public repo,
 and the SARIF upload needs code scanning. Delete the workflow on a private fork.

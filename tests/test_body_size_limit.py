@@ -7,13 +7,22 @@ plain ASGI for the message flow a well-behaved HTTP client never produces.
 """
 
 import asyncio
+import re
 from collections.abc import Iterator
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Message, Receive, Scope, Send
 
-from app.middleware import BodySizeLimitMiddleware
+from app.middleware import BodySizeLimitMiddleware, _declared_body_length
+
+# RFC 9110's Content-Length is `1*DIGIT`. Spelled out here from the spec
+# rather than imported from the parser, so the property below compares the
+# implementation against the grammar instead of against itself.
+RFC_9110_CONTENT_LENGTH = re.compile(rb"[0-9]+")
 
 
 def test_non_body_messages_pass_through_uncounted() -> None:
@@ -95,3 +104,36 @@ def test_an_unparseable_content_length_still_gets_the_streaming_cap(
         asyncio.run(guarded(scope, receive, send))
     assert raised.value.status_code == 413
     assert statuses == [], "the request was rejected up front, not as it streamed"
+
+
+@given(
+    st.one_of(
+        st.binary(max_size=16),
+        # Latin-1 because that is how Headers decodes a raw value, so this is
+        # the strategy that can produce the str forms int() and str.isdigit()
+        # disagree about ("²", "1_000") rather than their UTF-8 encodings.
+        st.text(alphabet="0123456789+-_ ²³\t", max_size=16).map(
+            lambda value: value.encode("latin-1")
+        ),
+    )
+)
+def test_a_length_is_read_from_exactly_the_values_rfc_9110_allows(
+    declared: bytes,
+) -> None:
+    """
+    Any Content-Length yields the declared size, or nothing - never an exception.
+
+    The parametrized cases above name three ways int() is laxer than the
+    grammar; this is the same claim without a list of guesses behind it, and
+    it is the property that actually matters: this function runs before
+    anything has framed the request, outside ServerErrorMiddleware, so a
+    ValueError escaping it leaves the client with no response at all. That
+    the call returns rather than raises is asserted by reaching the next
+    line - what the assertions add is that the *accepted* values are exactly
+    the grammar's, so a future edit cannot widen it back to int()'s.
+    """
+    length = _declared_body_length(Headers(raw=[(b"content-length", declared)]))
+    if RFC_9110_CONTENT_LENGTH.fullmatch(declared):
+        assert length == int(declared)
+    else:
+        assert length is None

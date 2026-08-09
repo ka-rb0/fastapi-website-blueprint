@@ -61,6 +61,14 @@ services:
       # Interactive API docs (/docs) are a dev tool: on by default in this
       # dev container, off anywhere the variable isn't set (production).
       WEBSITE_ENABLE_DOCS: ${WEBSITE_ENABLE_DOCS:-1}
+      # The GitHub CLI's token, so `gh` needs no interactive login. Its own
+      # state lives in /root/.config, which no volume above persists, so a
+      # rebuild - or any edit to .env, which recreates the container - would
+      # otherwise log it out again. Empty when unset, which makes gh fall back
+      # to whatever `gh auth login` stored. Git authenticates separately
+      # through the credential helper the Dev Containers extension installs;
+      # the two stay independent unless `gh auth setup-git` is run.
+      GH_TOKEN: ${GH_TOKEN_FWB:-}
     # No privilege escalation via setuid binaries, and drop the raw-socket capability.
     security_opt:
       - no-new-privileges:true

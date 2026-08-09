@@ -16,6 +16,8 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from starlette.types import Message, Receive, Scope, Send
 
 from app.middleware import RequestIDMiddleware
@@ -122,6 +124,48 @@ def test_a_control_character_never_reaches_the_header_or_the_log(
     """
     with bind_request_id(injected) as request_id:
         assert MINTED_ID.fullmatch(request_id)
+
+
+@given(
+    st.one_of(
+        # Arbitrary text, for the values a hostile or broken upstream sends:
+        # control characters, non-ASCII, empty.
+        st.text(max_size=128),
+        # And text drawn from the accepted range *plus space*, over lengths
+        # that straddle the bound. Unrestricted st.text() practically never
+        # produces a long all-printable-ASCII string, so without this arm the
+        # two boundaries most likely to be loosened by a careless edit - the
+        # 64-character cap and the exclusion of space - would never be tried.
+        st.text(
+            alphabet=st.characters(min_codepoint=0x20, max_codepoint=0x7E),
+            max_size=128,
+        ),
+    )
+)
+def test_no_inbound_header_can_produce_an_id_that_is_unsafe_to_emit(
+    candidate: str,
+) -> None:
+    """
+    Whatever arrives, the bound ID is safe to put in a header and a log line.
+
+    The examples above pick the four inbound values worth naming; this is the
+    claim app.observability actually makes about *every* other one, asserted
+    in the terms the guard exists for rather than by re-stating its regex:
+    bounded, so a header cannot bloat every log line; ASCII, so every hop can
+    encode it; no space, so nothing that reads log columns is fooled; nothing
+    unprintable, so a CR or LF cannot split the response header or forge a
+    line in the log. The second assertion pins the other half - correlation is
+    a diagnostic, so an unusable value is replaced with a minted ID rather
+    than rejected, and a usable one is echoed untouched.
+    """
+    with bind_request_id(candidate) as request_id:
+        assert 1 <= len(request_id) <= 64
+        assert request_id.isascii()
+        assert all(
+            character.isprintable() and not character.isspace()
+            for character in request_id
+        )
+        assert request_id == candidate or MINTED_ID.fullmatch(request_id)
 
 
 @pytest.mark.parametrize(

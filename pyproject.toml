@@ -19,7 +19,7 @@ dependencies = [
   "pydantic>=2.13.4",
   "fastapi>=0.140.13",
   "jinja2>=3.1.6",
-  "uvicorn[standard]>=0.52.0",
+  "uvicorn[standard]>=0.52.1",
 ]
 
 [dependency-groups]
@@ -39,6 +39,10 @@ lint = [
 ]
 dev = [
   { include-group = "lint" },
+  # Property-based testing for the two hand-written parsers that read
+  # attacker-controlled bytes - see the fuzzing note in docs/GITHUB_SETUP.md
+  # for why this, rather than a fuzzing harness, is the right size of tool.
+  "hypothesis>=6.165.2",
   "mypy>=2.2.0",
   "playwright>=1.61.0",
   "pytest>=9.1.1",
@@ -51,7 +55,7 @@ dev = [
 # single source of truth for the skip list - run as plain `codespell .`
 # (lockfiles are machine-generated: hashes and package names trip the checker)
 # (codespell does not read .gitignore, so it needs its own entries)
-skip = "./.git,./node_modules,./.venv,./.pytest_cache,./.ruff_cache,./.mypy_cache,./uv.lock,./package-lock.json,./shared_folder/data"
+skip = "./.git,./node_modules,./.venv,./.pytest_cache,./.ruff_cache,./.mypy_cache,./.hypothesis,./uv.lock,./package-lock.json,./shared_folder/data"
 
 [tool.ruff]
 exclude = [".claude/"]

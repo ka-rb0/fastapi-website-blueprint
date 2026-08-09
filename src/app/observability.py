@@ -17,6 +17,13 @@ from enum import StrEnum
 # guard and no feature flag to read a trace context that may not exist.
 from opentelemetry import trace
 
+# The `X-` prefix RFC 6648 deprecated in 2012, kept deliberately: every layer
+# likely to sit in front of this app already emits and forwards `x-request-id`
+# (Envoy, nginx, Heroku, most gateways), and a correlation header only
+# correlates when both hops spell it the same way - an RFC-clean `Request-ID`
+# would arrive *beside* the upstream's ID instead of continuing it. The casing
+# below is documentation rather than protocol: field names are case-insensitive
+# per RFC 9110, and Starlette lowercases this one on the way out regardless.
 REQUEST_ID_HEADER = "X-Request-ID"
 
 # What %(request_id)s shows for records emitted outside a request - startup,

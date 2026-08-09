@@ -189,7 +189,7 @@ def configure_logging(level: str, log_format: LogFormat = LogFormat.TEXT) -> Non
             "formatters": {
                 "default": (
                     {"format": TEXT_LOG_FORMAT}
-                    if log_format is LogFormat.TEXT
+                    if log_format == LogFormat.TEXT
                     else {"()": JsonLogFormatter}
                 )
             },

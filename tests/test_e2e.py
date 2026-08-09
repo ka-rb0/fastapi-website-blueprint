@@ -7,8 +7,6 @@ from collections.abc import Generator
 import pytest
 from playwright.sync_api import Browser, ConsoleMessage, Page, expect, sync_playwright
 
-from tests.accessibility import NON_TEXT_CONTRAST_MINIMUM, contrast_ratio
-
 CDN_URL = "https://cdn.jsdelivr.net"
 
 
@@ -278,38 +276,42 @@ def test_keyboard_arrow_moves_selection(page: Page) -> None:
 
 
 @pytest.mark.parametrize("theme", ["Light", "Dark"])
-def test_focus_ring_has_sufficient_contrast_on_checked_segment(
-    page: Page, theme: str
-) -> None:
+def test_focus_ring_surrounds_the_whole_group(page: Page, theme: str) -> None:
     """
-    Tabbing into the group must show a visible focus ring.
+    Tabbing into the group rings the pill, not the segment inside it.
 
-    Tab always enters a radio group at its *checked* radio, and that segment's
-    background is the accent color - a ring in the accent color would vanish
-    into it, making keyboard focus look like it skipped the group entirely.
+    The group is a single Tab stop (see base.html), so the pill is where the
+    keyboard user is; the segment that moves under the arrow keys marks itself
+    by being filled. The ring is the platform's own (outline: auto), the same
+    one the shout input and its button show - keeping it off the segment also
+    keeps it off the checked segment's accent background, where an authored
+    ring had to flip to a contrasting color to stay visible at all.
     """
     radio = page.get_by_role("radio", name=theme)
     page.keyboard.press("Tab")
     page.keyboard.press("ArrowLeft" if theme == "Light" else "ArrowRight")
     expect(radio).to_be_focused()
     style = page.evaluate(
-        "() => {"
-        "  const label = document.querySelector("
-        "    '.theme-switch label:has(input:checked)');"
-        "  const s = getComputedStyle(label);"
-        "  return {"
-        "    outlineStyle: s.outlineStyle,"
-        "    outlineColor: [...s.outlineColor.matchAll(/\\d+/g)].map(Number),"
-        "    background: [...s.backgroundColor.matchAll(/\\d+/g)].map(Number),"
-        "  };"
-        "}"
+        "() => ({"
+        "  group: getComputedStyle("
+        "    document.querySelector('.theme-switch')).outlineStyle,"
+        "  segment: getComputedStyle(document.querySelector("
+        "    '.theme-switch label:has(input:checked)')).outlineStyle,"
+        "})"
     )
-    assert style["outlineStyle"] == "solid", "no focus outline on the checked segment"
-    ratio = contrast_ratio(style["outlineColor"], style["background"])
-    assert ratio >= NON_TEXT_CONTRAST_MINIMUM, (
-        f"{theme.lower()} focus ring contrast is {ratio:.3f}:1; expected at least "
-        f"{NON_TEXT_CONTRAST_MINIMUM}:1"
+    assert style["group"] != "none", "no focus ring around the theme switch"
+    assert style["segment"] == "none", (
+        f"the {theme.lower()} segment still draws its own {style['segment']} ring"
     )
+    # ... and it is the very ring the page's other controls show, read off a
+    # focused one rather than asserted as a literal: a focus ring only exists
+    # while its control has focus, so an unfocused control has none to compare.
+    page.keyboard.press("Tab")
+    control = page.get_by_label("Text to shout")
+    expect(control).to_be_focused()
+    assert style["group"] == control.evaluate(
+        "control => getComputedStyle(control).outlineStyle"
+    ), "the theme switch's focus ring is not the one the other controls show"
 
 
 def test_auto_restores_os_theme(page: Page) -> None:

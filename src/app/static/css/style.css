@@ -80,16 +80,15 @@ a {
 }
 
 .theme-switch label:has(input:focus-visible) {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
+  /* the focus ring is on the pill, not the segment, so the radio's own ring */
+  z-index: -1;
 }
 
-.theme-switch label:has(input:checked:focus-visible) {
-  /* Tab always enters the group at the *checked* radio, and that segment's
-     background is the accent - an accent ring would vanish into it, making
-     keyboard focus look like it skipped the group. Ring in the segment's
-     text color instead. */
-  outline-color: var(--accent-fg);
+.theme-switch:has(input:focus-visible) {
+  /* Ring the whole pill rather than the focused segment: the group is a
+     single Tab stop, so the group is where the keyboard user is - arrow keys
+     then move the filled segment inside it, which is its own indicator. */
+  outline: auto;
 }
 
 .theme-switch label:has(input:checked) {

@@ -83,6 +83,24 @@ image; no second command is needed.
   themselves stay in code - `TEXT_LOG_FORMAT` and `JSON_LOG_FIELDS` in
   `src/app/observability.py` - because they are the log schema your
   dashboards match on; edit them there to add or rename a field.
+- OpenTelemetry traces and metrics are **off until you name a collector**:
+  set `OTEL_EXPORTER_OTLP_ENDPOINT` (e.g. `http://collector:4318`) and
+  `OTEL_SERVICE_NAME`, and the app exports the standard HTTP semantics -
+  `http.server.request.duration`, `http.server.active_requests`, one server
+  span per request carrying `http.route` and the request's `X-Request-ID`.
+  Both variables are required together: telemetry with no service name would
+  arrive as `unknown_service`, so the app refuses to start instead. Everything
+  else is the SDK's own vocabulary and needs no code change - sample down with
+  `OTEL_TRACES_SAMPLER`/`OTEL_TRACES_SAMPLER_ARG`, add resource attributes with
+  `OTEL_RESOURCE_ATTRIBUTES`, silence it fleet-wide with `OTEL_SDK_DISABLED=true`.
+  Only OTLP over HTTP/protobuf is installed, so leave
+  `OTEL_EXPORTER_OTLP_PROTOCOL` unset or set it to `http/protobuf`; `grpc`
+  fails at startup rather than exporting into the void. The probe routes are
+  never traced (they would outnumber real traffic); add your own exclusions
+  with `OTEL_PYTHON_EXCLUDED_URLS` and they are added to that, not swapped for
+  it. JSON log lines gain `trace_id`/`span_id` while a request is being traced,
+  which is how a backend joins a log line to its trace - see "Telemetry" in
+  [ARCHITECTURE.md](ARCHITECTURE.md).
 - Importing `app.main` claims process-wide logging, so **the root and Uvicorn
   portions of `uvicorn --log-config` are silently overridden** when you serve
   `app.main:app`; explicitly named non-Uvicorn loggers may retain their

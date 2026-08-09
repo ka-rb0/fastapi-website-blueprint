@@ -1,63 +1,18 @@
 """Application-factory and configuration isolation tests."""
 
-import asyncio
-
 import pytest
 from starlette.routing import Mount, Route
-from starlette.types import ASGIApp, Message, Scope
 
 from app.config import DEFAULT_MAX_BODY_BYTES, DEFAULT_TRUSTED_HOSTS, Settings
 from app.factory import create_app
 from app.middleware import DOCS_CSP, SECURITY_HEADERS
 from app.observability import LogFormat
-from tests.helpers import body_limited_app, framework_app, security_headers_app
-
-
-def _get(
-    application: ASGIApp, path: str, *, host: str
-) -> tuple[int, dict[str, str], bytes]:
-    """Drive one GET through an ASGI app without a server or global environment."""
-    messages: list[Message] = []
-    request_sent = False
-
-    async def receive() -> Message:
-        nonlocal request_sent
-        if request_sent:
-            return {"type": "http.disconnect"}
-        request_sent = True
-        return {"type": "http.request", "body": b"", "more_body": False}
-
-    async def send(message: Message) -> None:
-        messages.append(message)
-
-    scope: Scope = {
-        "type": "http",
-        "asgi": {"version": "3.0"},
-        "http_version": "1.1",
-        "method": "GET",
-        "scheme": "http",
-        "path": path,
-        "raw_path": path.encode(),
-        "query_string": b"",
-        "root_path": "",
-        "headers": [(b"host", host.encode())],
-        "server": (host, 80),
-        "client": ("127.0.0.1", 12345),
-    }
-    asyncio.run(application(scope, receive, send))
-
-    start = next(
-        message for message in messages if message["type"] == "http.response.start"
-    )
-    body = b"".join(
-        message.get("body", b"")
-        for message in messages
-        if message["type"] == "http.response.body"
-    )
-    headers = {
-        name.decode().lower(): value.decode() for name, value in start["headers"]
-    }
-    return start["status"], headers, body
+from tests.helpers import (
+    body_limited_app,
+    drive_get,
+    framework_app,
+    security_headers_app,
+)
 
 
 def test_factory_keeps_application_configurations_isolated() -> None:
@@ -98,29 +53,25 @@ def test_factory_keeps_application_configurations_isolated() -> None:
     assert body_limited_app(docs_app).max_body_bytes == 1_024
     assert body_limited_app(production_app).max_body_bytes == 2_048
 
-    docs_status, docs_headers, docs_body = _get(docs_app, "/docs", host="docs.example")
-    production_status, production_headers, _ = _get(
-        production_app, "/docs", host="www.example"
-    )
-    assert docs_status == 200
-    assert b'<div id="swagger-ui">' in docs_body
-    assert docs_headers["content-security-policy"] == DOCS_CSP
-    assert production_status == 404
+    docs_page = drive_get(docs_app, "/docs", host="docs.example")
+    gated_page = drive_get(production_app, "/docs", host="www.example")
+    assert docs_page.status == 200
+    assert b'<div id="swagger-ui">' in docs_page.body
+    assert docs_page.headers["content-security-policy"] == DOCS_CSP
+    assert gated_page.status == 404
     assert (
-        production_headers["content-security-policy"]
+        gated_page.headers["content-security-policy"]
         == SECURITY_HEADERS["Content-Security-Policy"]
     )
 
     # The schema gates together with the docs UI, at the request level too -
     # and its 404 carries the strict CSP, never the docs relaxation.
-    schema_status, _, _ = _get(docs_app, "/openapi.json", host="docs.example")
-    gated_status, gated_headers, _ = _get(
-        production_app, "/openapi.json", host="www.example"
-    )
-    assert schema_status == 200
-    assert gated_status == 404
+    schema = drive_get(docs_app, "/openapi.json", host="docs.example")
+    gated_schema = drive_get(production_app, "/openapi.json", host="www.example")
+    assert schema.status == 200
+    assert gated_schema.status == 404
     assert (
-        gated_headers["content-security-policy"]
+        gated_schema.headers["content-security-policy"]
         == SECURITY_HEADERS["Content-Security-Policy"]
     )
 

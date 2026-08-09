@@ -38,8 +38,12 @@ in-process test goes through:
 RequestIDMiddleware              <- outermost: nothing below it logs or
   SecurityHeadersMiddleware         answers without a correlation ID
     BodySizeLimitMiddleware      <- its 413s must carry both
-      FastAPI (ServerErrorMiddleware, TrustedHostMiddleware, routers, ...)
+      FastAPI (OpenTelemetry, ServerErrorMiddleware, TrustedHostMiddleware, ...)
 ```
+
+The OpenTelemetry server span is the outermost thing _inside_ FastAPI
+when telemetry is enabled, and nothing when it is not - see "Telemetry"
+for why it belongs there rather than beside the wrappers above.
 
 All three wrappers are pure ASGI classes, _not_ `add_middleware`, because
 Starlette places user middleware inside its outermost
@@ -65,7 +69,13 @@ in from the environment, and `from_env` is where that is caught.
 `Settings.from_env()` accepts an explicit mapping so tests can exercise
 parsing without touching `os.environ`. Defaults are production-safe:
 docs off, localhost-only hosts, 1 MB body cap, human-readable logs (the
-image opts into JSON, see "Distribution image").
+image opts into JSON, see "Distribution image"), telemetry off until a
+collector is named (see "Telemetry").
+
+The `OTEL_*` variables are the one group read by somebody else's rules
+rather than this module's - `Settings` decides only _whether_ telemetry
+happens, and everything about how it happens stays with the SDK that
+already specifies it.
 
 Trusted-host entries are lowercased and validated against Starlette's host
 pattern contract before the application exists: an exact ASCII host name,
@@ -472,7 +482,7 @@ second problem but retains the `--log-config` tradeoff above.
 should not presume a log pipeline) or `json` (one object per line, which
 is what the distribution image's environment selects - see "Distribution
 image" below). Picking is all it does: both renderings carry the same
-fields, the correlation ID included, because `RequestIDFilter` puts it on
+fields, the correlation ID included, because `CorrelationFilter` puts it on
 the record before either formatter sees it.
 
 Splitting it that way is deliberate. Every deployment with an aggregator
@@ -499,10 +509,156 @@ records and only `logging.Formatter` knows how to render them - dropping
 them would ship uvicorn's "Exception in ASGI application" with the cause
 gone, which is the one record the correlation ID exists for. Timestamps
 are RFC 3339 in UTC, so records from replicas in different zones order
-against each other. The same seam is where
-OpenTelemetry would go: `bind_request_id` is the one place that decides
-what a request is correlated by, so parsing `traceparent` into a real
-trace context means changing that function, not the middleware.
+against each other.
+
+`trace_id` and `span_id` are the two keys that behave differently: they
+are _absent_ from a record rather than empty on it, because only a record
+emitted while a span is current has a trace to name. They are what joins
+a log line to the trace beside it (see "Telemetry" below), and they do
+not replace the request ID - that one is on every record, including the
+ones no trace covers (startup, shutdown, a request on a path telemetry
+excludes, anything at all with no collector configured), and it is the
+only one of the three the client is handed back. Uvicorn's access line -
+the one line per request - carries all three, because uvicorn writes it
+from the `send()` call the instrumentation is still wrapping;
+`tests/test_telemetry.py` pins that the ID on that line is the trace the
+collector received. The text rendering deliberately carries neither trace
+field: it is what a developer tails in a terminal, where 48 hex
+characters would be the part nobody reads.
+
+`CorrelationFilter` reads the trace context through `opentelemetry-api`,
+never the SDK. With no provider installed - the state of every deployment
+that configured no collector - the API returns its documented no-op
+objects, which is what lets that module import OpenTelemetry
+unconditionally, with no feature flag and no `try: import`.
+
+## Telemetry (`src/app/telemetry.py`)
+
+Logs answer _what happened_. They cannot answer _how long the checkout
+endpoint takes at p99_ without something aggregating them first, and
+every alert worth having is a threshold on a number. So the app emits
+OpenTelemetry traces and metrics as well - and emits them under the
+names OpenTelemetry specifies, because that is the entire value on
+offer: a fleet where `http.server.request.duration` means the same thing
+on every service can share one dashboard and one alert, and a fleet where
+each project invented a counter cannot.
+
+Nothing here is written by hand. `opentelemetry-instrumentation-fastapi`
+produces the server span and the HTTP metrics; the SDK reads endpoint,
+headers, timeouts, compression, sampler, batch sizes and export intervals
+from the standard `OTEL_*` variables. What this module owns is four
+decisions the environment cannot express.
+
+**Whether telemetry happens at all.** It is on exactly when a collector
+endpoint is configured - `OTEL_EXPORTER_OTLP_ENDPOINT`, or either
+per-signal variant, for a deployment that splits traces from metrics -
+and off otherwise, which is the default and the whole of the off switch.
+There is deliberately no `WEBSITE_ENABLE_TELEMETRY` beside it: an
+endpoint variable _and_ a flag are two ways to say one thing, and the
+deployment that sets one without the other is silently wrong either way.
+Off means _absent_, not idle: no provider is installed, and `create_app`
+adds no instrumentation, so a default deployment pays nothing rather
+than paying to build spans that are dropped. `OTEL_SDK_DISABLED` is
+honored as the specification's own kill switch - and by the
+specification's rules, where only `"true"` is true and everything else is
+false, unlike the strict `WEBSITE_ENABLE_DOCS`. The `OTEL_*` names belong
+to OpenTelemetry; reading them the house way would make this the one
+service in a fleet that refuses to start.
+
+**That a misconfiguration fails at boot.** Exporting as
+`unknown_service` is not a degraded state somebody notices later: the
+data lands in the backend under a name shared with every other service
+nobody named, where it cannot be dashboarded, alerted on or told apart.
+So telemetry with no `OTEL_SERVICE_NAME` (or `service.name` in
+`OTEL_RESOURCE_ATTRIBUTES`) refuses to boot, exactly like an invalid host
+pattern. So does `OTEL_EXPORTER_OTLP_PROTOCOL=grpc`: only the
+HTTP/protobuf exporter is installed - gRPC would put `grpcio` in every
+image for a transport an ingress cannot route - and ignoring the variable
+would leave an HTTP exporter pointed at a port speaking gRPC, visible
+only as exports that never arrive.
+
+**That both signals describe one service.** Traces and metrics share a
+single `Resource`, rather than building one each from the same
+variables: two would be equal today and drift the first time a detector
+or an attribute is added to one call site and not the other, at which
+point a service's traces and its metrics stop being the same service to
+anything reading them.
+
+**Which HTTP conventions to speak.** The instrumentation still defaults
+to the pre-stable names (`http.method`, a millisecond
+`http.server.duration`) and emits the stable ones
+(`http.request.method`, a second-valued `http.server.request.duration`)
+only for a process that opts in. This app opts in, by defaulting
+`OTEL_SEMCONV_STABILITY_OPT_IN=http` - a `setdefault`, so a fleet
+mid-migration can still ask for `http/dup` and get both name sets. It is
+the one environment variable this app writes rather than reads, because
+the opt-in is read once per process by the instrumentation and there is
+no argument to pass it through.
+
+### Where the instrumentation sits
+
+`FastAPIInstrumentor.instrument_app` wraps FastAPI's _entire_ middleware
+stack, error handling included, so an unhandled exception is a failed
+span carrying the exception event rather than a missing one. It sits
+inside this app's own wrappers, though (see "Composition root"), and that
+is a deliberate trade rather than an oversight: a server span is worth
+its cost only with the matched route on it, and nothing outside FastAPI
+knows which route a request will reach. The price is one blind spot - a
+request rejected by the body cap _before_ routing is logged with its ID
+and never traced, the only response of this app's that telemetry does not
+see.
+
+**Probe traffic is excluded.** Every layer in front of a deployment polls
+`/livez`, `/readyz` and `/healthz` several times a minute forever; traced,
+they would outnumber real requests in the trace store and pull the
+latency histogram toward the cost of returning a constant. The exclusion
+is expressed as a suffix match, not an anchored one, because the URL the
+instrumentation matches against still carries whatever `root_path` the
+deployment runs under - the same reversal problem `get_route_path` solves
+elsewhere, on a string that has already been turned back into a URL. A
+deployment's own exclusions go in the standard
+`OTEL_PYTHON_EXCLUDED_URLS` and are _added_ to these, via
+`Settings.telemetry_excluded_urls`: left to the instrumentation, that
+variable replaces the list it is given, so excluding one noisy path of
+your own would quietly put the probes back into every trace.
+
+### What is deliberately not here
+
+- **No logs signal.** The app writes its log stream to stdout, where a
+  collector's file receiver or the platform's own agent already picks it
+  up (see "Request correlation"), and the records carry `trace_id` and
+  `span_id` so the join happens at the backend. A second delivery path
+  for the same lines would buy nothing and lose them when the process
+  dies with a full buffer.
+- **No runtime or process metrics.** CPU, memory and restarts are what
+  the platform measures about a container, from outside, whether or not
+  the process agrees. The app reports what only the app knows.
+- **No hand-written counters.** There are none to write yet, and the
+  instrumentation covers every request. When a fork needs one, it creates
+  it from `metrics.get_meter(__name__)` - the API resolves to a no-op
+  when telemetry is off, so a new counter needs no flag of its own.
+
+`configure_telemetry` is called from `app.main` for the reason
+`configure_logging` is, and it is the same reason twice: providers are
+one per process, so installing them is the entry point's business and
+never a library's. An app embedded in a service that already exports
+telemetry keeps that service's providers and its own trace context. Both
+providers flush through the SDK's own `atexit` hook, which is why nothing
+in the lifespan drains them - a lifespan runs per application, and these
+are process-wide.
+
+Two costs worth knowing. Sampling defaults to "keep everything"
+(`ParentBased(AlwaysOn)`), which is right for a blueprint and wrong for
+a busy service: turn it down with `OTEL_TRACES_SAMPLER` rather than by
+touching code. And instrumenting any app in the process patches
+Starlette's `BackgroundTask` globally, upstream's doing, so a second
+app in the same process with telemetry off still has traced background
+tasks.
+
+`tests/test_telemetry.py` covers this in two halves: in-memory providers
+for what the instrumentation records, and a real uvicorn exporting over
+OTLP to a stub collector the test parses, because an in-memory exporter
+proves the instrumentation and nothing about the transport.
 
 ## Branded 404 (`src/app/exceptions.py`)
 

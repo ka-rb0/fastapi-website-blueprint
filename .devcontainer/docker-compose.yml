@@ -42,6 +42,12 @@ services:
       PYTHONDONTWRITEBYTECODE: 1
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: ${LOG_FORMAT:-text}
+      # OpenTelemetry is off while these are empty, which is the default (see
+      # "Telemetry" in docs/ARCHITECTURE.md). Forwarded rather than omitted so
+      # pointing the dev server at a local collector is an .env edit, not a
+      # Compose edit - and so the test suite's servers inherit the same state.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-}
       DATA_PATH: ${DATA_PATH}
       # Native server settings for the direct development listener. Proxy-only
       # settings belong to the separate proxy-backend service below, so no
@@ -98,6 +104,8 @@ services:
       PYTHONDONTWRITEBYTECODE: 1
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: ${LOG_FORMAT:-json}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-}
       UVICORN_HOST: 0.0.0.0
       UVICORN_PORT: ${WEBSITE_PROXY_BACKEND_PORT:?set it in .devcontainer/.env, see .env.example}
       UVICORN_RELOAD: "true"

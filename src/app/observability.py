@@ -11,6 +11,12 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from enum import StrEnum
 
+# The API package, never the SDK: with no provider installed - the state of a
+# deployment that configured no collector - every call below returns
+# OpenTelemetry's documented no-op objects, so this module needs no import
+# guard and no feature flag to read a trace context that may not exist.
+from opentelemetry import trace
+
 REQUEST_ID_HEADER = "X-Request-ID"
 
 # What %(request_id)s shows for records emitted outside a request - startup,
@@ -40,8 +46,10 @@ class LogFormat(StrEnum):
     JSON = "json"
 
 
-# The correlation ID reaches the record either way, because RequestIDFilter is what
-# puts it there.
+# The correlation ID reaches the record either way, because CorrelationFilter is
+# what puts it there. Deliberately without the trace and span IDs the JSON
+# rendering carries: this is the line a developer reads in a terminal, and 48
+# hex characters of it would be the part that is never read by a human.
 TEXT_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s [%(request_id)s] %(message)s"
 
 # JSON key -> LogRecord attribute, in the order the object is written. An
@@ -50,11 +58,19 @@ TEXT_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s [%(request_id)s] %(message
 # edit here and no `extra=` at some call site can widen or rename the schema
 # from a distance. Rename the keys to match a house convention (ECS's
 # `log.level`, Google Cloud's `severity`) by editing this mapping alone.
+# `trace_id` and `span_id` are the two keys that are absent from most records
+# rather than empty on them: only a record emitted while a span is current has
+# a trace to name, which is what the formatter's hasattr check below already
+# expresses. Their spelling is the one the OpenTelemetry logging conventions
+# use, so a backend that joins logs to traces on those fields does it without
+# a mapping.
 JSON_LOG_FIELDS: Mapping[str, str] = {
     "time": "asctime",
     "level": "levelname",
     "logger": "name",
     "request_id": "request_id",
+    "trace_id": "trace_id",
+    "span_id": "span_id",
     "message": "message",
 }
 
@@ -104,14 +120,29 @@ def bind_request_id(candidate: str | None) -> Generator[str]:
     _request_id.reset(token)
 
 
-class RequestIDFilter(logging.Filter):
-    """Stamp the current correlation ID onto every record reaching a handler."""
+class CorrelationFilter(logging.Filter):
+    """Stamp the correlation and trace identifiers onto every record."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        """Add ``request_id`` to the record and keep it."""
+        """Add ``request_id`` - and the trace context, if any - and keep the record."""
         # Through __dict__ because that is where Formatter reads %(request_id)s
         # from, and LogRecord declares no such attribute to assign to.
         record.__dict__["request_id"] = get_request_id()
+        # A no-op span context whenever telemetry is off or the record belongs
+        # to no request, and the two identifiers are then left off the record
+        # entirely rather than written as zeros - an all-zero trace ID is a
+        # value a backend will happily index and join on.
+        #
+        # The two IDs do not replace the request ID, they sit beside it: this
+        # one is on every record - startup, shutdown, a request on a path
+        # telemetry excludes, anything at all with no collector configured -
+        # and it is the only one of the three the client is handed back.
+        # Uvicorn's access line does carry all three, because uvicorn writes it
+        # from the send() call the instrumentation is still wrapping.
+        span_context = trace.get_current_span().get_span_context()
+        if span_context.is_valid:
+            record.__dict__["trace_id"] = trace.format_trace_id(span_context.trace_id)
+            record.__dict__["span_id"] = trace.format_span_id(span_context.span_id)
         return True
 
 
@@ -185,7 +216,7 @@ def configure_logging(level: str, log_format: LogFormat = LogFormat.TEXT) -> Non
             # Loggers already created by imported modules (app.lifecycle, ...)
             # must keep working; this reconfigures the process, not the world.
             "disable_existing_loggers": False,
-            "filters": {"request_id": {"()": RequestIDFilter}},
+            "filters": {"correlation": {"()": CorrelationFilter}},
             "formatters": {
                 "default": (
                     {"format": TEXT_LOG_FORMAT}
@@ -201,7 +232,7 @@ def configure_logging(level: str, log_format: LogFormat = LogFormat.TEXT) -> Non
                     # out of order with itself the way two buffered ones do.
                     "stream": "ext://sys.stdout",
                     "formatter": "default",
-                    "filters": ["request_id"],
+                    "filters": ["correlation"],
                 }
             },
             "loggers": {

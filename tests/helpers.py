@@ -1,5 +1,6 @@
 """Shared helpers for tests that drive the factory-built stack or read pages."""
 
+import asyncio
 import json
 import re
 import urllib.parse
@@ -8,6 +9,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from fastapi import FastAPI
+from starlette.types import ASGIApp, Message, Scope
 
 from app.middleware import (
     BodySizeLimitMiddleware,
@@ -16,6 +18,68 @@ from app.middleware import (
 )
 
 DOCKERFILE = Path(__file__).parent.parent / ".devcontainer" / "Dockerfile"
+
+
+class DrivenResponse(NamedTuple):
+    """What one request driven through an ASGI app answered with."""
+
+    status: int
+    headers: dict[str, str]
+    body: bytes
+
+
+def drive_get(application: ASGIApp, path: str, *, host: str) -> DrivenResponse:
+    """
+    Drive one GET through an ASGI app without a server or global environment.
+
+    The in-process counterpart to the live-server fixtures in conftest.py: it
+    exercises the real wrapper stack a factory built, so a configuration
+    variant that needs no server behavior needs no port either (see "Testing
+    strategy" in docs/ARCHITECTURE.md).
+    """
+    messages: list[Message] = []
+    request_sent = False
+
+    async def receive() -> Message:
+        nonlocal request_sent
+        if request_sent:
+            return {"type": "http.disconnect"}
+        request_sent = True
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: Message) -> None:
+        messages.append(message)
+
+    scope: Scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "root_path": "",
+        "headers": [(b"host", host.encode())],
+        "server": (host, 80),
+        "client": ("127.0.0.1", 12345),
+    }
+    asyncio.run(application(scope, receive, send))
+
+    start = next(
+        message for message in messages if message["type"] == "http.response.start"
+    )
+    return DrivenResponse(
+        status=start["status"],
+        headers={
+            name.decode().lower(): value.decode() for name, value in start["headers"]
+        },
+        body=b"".join(
+            message.get("body", b"")
+            for message in messages
+            if message["type"] == "http.response.body"
+        ),
+    )
 
 
 def distribution_entrypoint() -> list[str]:

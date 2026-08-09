@@ -10,6 +10,18 @@ from .observability import LogFormat
 DEFAULT_MAX_BODY_BYTES = 1_000_000
 DEFAULT_TRUSTED_HOSTS = ("localhost", "127.0.0.1")
 
+# Telemetry turns itself on when a collector is named, so there is no
+# WEBSITE_ENABLE_* flag beside these: an endpoint variable and a switch would
+# be two ways to say the same thing, and the deployment that set one and not
+# the other would be silently wrong either way. The per-signal variables count
+# too, because a deployment may route traces and metrics to different
+# collectors and never set the general one.
+OTLP_ENDPOINT_VARIABLES = (
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+)
+
 
 def _normalize_trusted_host(raw_host: str) -> str:
     """Return one canonical Starlette host pattern or reject it."""
@@ -69,6 +81,20 @@ class Settings:
     # enum rather than a string, so the only validation needed is on the way
     # in from the environment (from_env below).
     log_format: LogFormat = LogFormat.TEXT
+    # Whether this app exports OpenTelemetry traces and metrics. Off unless
+    # from_env finds a collector endpoint, so the blueprint's local behavior is
+    # unchanged and no deployment starts talking to localhost:4318 because a
+    # library defaulted it there. Everything *about* the export - where, how,
+    # how often, how heavily sampled - stays in the OTEL_* variables the SDK
+    # itself reads (see app.telemetry); this is only whether any of it happens.
+    telemetry_enabled: bool = False
+    # Extra URL patterns the instrumentation skips, on top of the probe routes
+    # the composition root always exempts. Carried through Settings rather than
+    # left to the instrumentation's own reading of OTEL_PYTHON_EXCLUDED_URLS,
+    # because that variable *replaces* the list it is given: a deployment
+    # excluding one noisy path of its own would otherwise silently put the
+    # probes back into every trace and every latency histogram.
+    telemetry_excluded_urls: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Normalize human-entered values and reject unsafe configuration."""
@@ -128,6 +154,19 @@ class Settings:
                 f"LOG_FORMAT must be one of {', '.join(LogFormat)},"
                 f" got {raw_log_format!r}"
             ) from None
+        # The OTEL_* variables are OpenTelemetry's, not this app's, so they are
+        # read by its rules rather than this module's: the specification
+        # defines OTEL_SDK_DISABLED as a boolean whose only true spelling is
+        # "true" and requires anything else to be taken as false, where a
+        # WEBSITE_* flag would refuse to boot on "yes". Honoring it here rather
+        # than leaving it to the SDK - which also checks it - is what makes the
+        # kill switch free: with telemetry off, the instrumentation is never
+        # added to the application at all, instead of running to feed providers
+        # that discard everything.
+        sdk_disabled = values.get("OTEL_SDK_DISABLED", "").strip().lower() == "true"
+        telemetry_enabled = not sdk_disabled and any(
+            values.get(variable, "").strip() for variable in OTLP_ENDPOINT_VARIABLES
+        )
         return cls(
             docs_enabled=raw_docs_enabled == "1",
             trusted_hosts=tuple(
@@ -138,4 +177,12 @@ class Settings:
             max_body_bytes=max_body_bytes,
             log_level=values.get("LOG_LEVEL", "INFO"),
             log_format=log_format,
+            telemetry_enabled=telemetry_enabled,
+            telemetry_excluded_urls=tuple(
+                pattern
+                for raw_pattern in values.get("OTEL_PYTHON_EXCLUDED_URLS", "").split(
+                    ","
+                )
+                if (pattern := raw_pattern.strip())
+            ),
         )

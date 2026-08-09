@@ -38,6 +38,10 @@ dark themes.
 - Request correlation: every request gets an `X-Request-ID` (accepted from
   the caller when usable, minted otherwise), echoed on the response and
   printed on every log line - uvicorn's access log included.
+- OpenTelemetry traces and metrics under the stable HTTP semantic-convention
+  names, off until you point `OTEL_EXPORTER_OTLP_ENDPOINT` at a collector -
+  no code change, no home-grown metric names, and probe traffic excluded so
+  it can't drown the real thing.
 - Strict linting and type checking wired into CI.
 - Security by default: same-origin CSP and hardening headers on every
   response, a Host-header allowlist, a transport-level request-body cap,

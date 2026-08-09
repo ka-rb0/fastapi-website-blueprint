@@ -21,9 +21,9 @@ from pathlib import Path
 from app.observability import (
     NO_REQUEST_ID,
     REQUEST_ID_HEADER,
+    CorrelationFilter,
     JsonLogFormatter,
     LogFormat,
-    RequestIDFilter,
     bind_request_id,
 )
 from app.routers.probes import LIVENESS_PATH
@@ -33,7 +33,9 @@ from .helpers import distribution_environment
 
 # The keys a consumer of these logs writes its queries against, spelled out
 # rather than read back from JSON_LOG_FIELDS: asserting against the mapping the
-# formatter itself reads would pass no matter what the mapping said.
+# formatter itself reads would pass no matter what the mapping said. Every
+# record carries these; `trace_id`/`span_id` join them only while a span is
+# current, which tests/test_telemetry.py covers.
 JSON_KEYS = {"time", "level", "logger", "request_id", "message"}
 
 
@@ -65,7 +67,7 @@ def test_a_record_becomes_one_json_object_with_the_declared_fields() -> None:
     """
     record = _record()
     with bind_request_id("traced-id"):
-        RequestIDFilter().filter(record)
+        CorrelationFilter().filter(record)
     line = JsonLogFormatter().format(record)
 
     assert "\n" not in line, "a multi-line record is more than one log event"
@@ -94,7 +96,7 @@ def test_the_timestamp_is_rfc_3339_in_utc() -> None:
 
 def test_a_field_the_record_never_got_is_left_out_rather_than_raising() -> None:
     """
-    A record that missed RequestIDFilter still logs, minus that one key.
+    A record that missed CorrelationFilter still logs, minus that one key.
 
     `request_id` is the field nothing but the filter supplies, so any handler
     installed without it - a library's, a test harness's - hands this formatter

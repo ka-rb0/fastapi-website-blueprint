@@ -4,7 +4,9 @@
 #
 # What each event produces:
 #   push to main    -> :main and :sha-<short>            (rolling default-branch image)
-#   push tag v1.2.3 -> :1.2.3, :1.2 and :latest, then a deploy to Azure
+#   push tag v1.2.3 -> :1.2.3, :1.2 and :latest, then a deploy to wherever the
+#                      DEPLOY_TO repository variable points (see the `targets`
+#                      job at the bottom of this file)
 #   push tag v1.2.3-rc.1 -> :1.2.3-rc.1 only; no :latest, and no deploy
 #   pull request    -> nothing published; the image is built to prove the
 #                      Dockerfile and the locked dependencies still produce a
@@ -324,247 +326,99 @@ jobs:
           docker rm --force smoke >/dev/null
           exit 1
 
-  # Rolls a verified release out to Azure Container Apps.
+  # Decides where this release is deployed, and is the only job that knows.
+  # Each provider lives in its own deploy-<provider>.yml, called below; this
+  # job turns the DEPLOY_TO repository variable into the flags that select
+  # them, so adding a provider never means editing a condition twice.
   #
-  # This is a job here rather than a deploy.yml keyed to `release: published`
-  # because only at this point is the digest already trustworthy: `verify`
-  # above pulled it back out of the registry, checked both Sigstore
-  # signatures and proved it boots. A separate workflow would have to
-  # re-resolve a tag to a digest and race this one to do it.
+  # Deliberately at the *end* of the chain, after the image is published,
+  # signed and verified: a release that cannot be deployed - because DEPLOY_TO
+  # is unset or misspelled - should still leave a usable, verified image in
+  # ghcr.io. The cost is that the mistake surfaces at the end of the run
+  # rather than in the first 15 seconds.
   #
   # Only full releases deploy. A prerelease (v1.2.3-rc.1) publishes its image
   # and stops here - the same line `latest=auto` already draws for :latest,
   # and the reason .github/rulesets/protect-tags.json admits a `-prerelease`
   # suffix at all. `contains(..., '-')` is a sound test for that because the
-  # ruleset's tag_name_pattern lets a hyphen appear nowhere else.
-  #
-  # The deployment target comes from repository variables, not from this file:
-  # which resources a release lands on is a property of the repository, not of
-  # the code, so a fork or a second environment retargets it without a commit.
-  # They are `vars`, not `secrets`, because resource names are not
-  # confidential - `vars` keeps them readable in the run log, where they are
-  # exactly what you want to see when a deploy goes somewhere unexpected.
-  # docs/GITHUB_SETUP.md lists both.
-  deploy:
+  # ruleset's tag_name_pattern lets a hyphen appear nowhere else. The
+  # condition lives on this job alone; the deploy jobs below inherit it,
+  # because a skipped `needs:` skips its dependents.
+  targets:
     needs: [publish, verify]
     if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    # Load-bearing, not decoration. Without an `environment`, this job's OIDC
-    # token carries the subject `repo:<owner>/<repo>:ref:refs/tags/v1.2.3` -
-    # a different string for every release, and an Azure federated identity
-    # credential matches one fixed subject, so the login would fail on the
-    # first release and every one after it. Naming the environment pins the
-    # subject to `repo:<owner>/<repo>:environment:production` for good. It
-    # also gives releases an approval gate and a deployment log. The exact
-    # value to set on the Azure side is in docs/GITHUB_SETUP.md.
-    environment:
-      name: production
-      url: https://${{ steps.target.outputs.fqdn }}
+    timeout-minutes: 5
+    # No checkout, no registry, no cloud - this job reads one variable, so it
+    # keeps the workflow's empty default permissions.
+    outputs:
+      azure: ${{ steps.plan.outputs.azure }}
+    steps:
+      - name: Resolve the deployment targets
+        id: plan
+        env:
+          # Passed through the environment rather than interpolated into the
+          # script: `${{ }}` inside a `run:` block pastes the value in as
+          # shell source before bash ever sees it.
+          DEPLOY_TO: ${{ vars.DEPLOY_TO }}
+        run: |
+          set -euo pipefail
+          # Every provider this repository can deploy to. Adding one is three
+          # edits: this list, a .github/workflows/deploy-<provider>.yml, and a
+          # job below - the accepted values and the error message follow from
+          # this line on their own.
+          providers="azure"
+
+          requested="${DEPLOY_TO,,}"
+          selected=""
+          for provider in $providers; do
+            if [ "$requested" = "$provider" ] || [ "$requested" = "all" ]; then
+              selected="${selected:+${selected} }${provider}"
+              echo "${provider}=true" >> "$GITHUB_OUTPUT"
+            fi
+          done
+          if [ -n "$selected" ]; then
+            echo "::notice::DEPLOY_TO=${requested} - deploying this release to: ${selected}."
+            exit 0
+          fi
+          # An explicit opt out, and the only way to publish without deploying:
+          # green, because nothing failed - the repository asked for exactly
+          # this. Unset is not the same thing and fails below, so a release
+          # never silently goes nowhere.
+          if [ "$requested" = "none" ]; then
+            echo "::notice::DEPLOY_TO=none - the release is published but will not be deployed."
+            exit 0
+          fi
+          # Renders "'azure', 'all' or 'none'" today, and grows a value the
+          # day the providers list above does.
+          valid=""
+          for value in $providers all; do
+            valid="${valid:+${valid}, }'${value}'"
+          done
+          echo "::error::DEPLOY_TO variable must be set to ${valid} or 'none'; got '${DEPLOY_TO}'. Set it under Settings -> Secrets and variables -> Actions -> Variables (see docs/GITHUB_SETUP.md)."
+          exit 1
+
+  # The Azure rollout itself is .github/workflows/deploy-azure.yml, called
+  # from here rather than triggered on its own event: that keeps the `needs:`
+  # chain, and with it the guarantee that the digest handed over is the one
+  # `verify` proved. See that file's header for the rest.
+  #
+  # `verify` is named again even though `targets` already depends on it - what
+  # this job requires is a *verified* digest, and stating that here is worth
+  # one redundant edge in the graph.
+  deploy-azure:
+    needs: [publish, verify, targets]
+    if: needs.targets.outputs.azure == 'true'
+    uses: ./.github/workflows/deploy-azure.yml
+    with:
+      image: ${{ needs.publish.outputs.image }}
+      digest: ${{ needs.publish.outputs.digest }}
     permissions:
       contents: read
       id-token: write # mint the OIDC token Azure exchanges for an access token
-    env:
-      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
-      CONTAINER_APP: ${{ vars.AZURE_CONTAINER_APP }}
-    steps:
-      # An undefined variable interpolates to the empty string rather than
-      # failing, and `az ... --name ""` reports a generic argument error that
-      # says nothing about the cause. Name it here instead, before the run has
-      # signed in to anything.
-      - name: Check the deployment target is configured
-        run: |
-          set -euo pipefail
-          missing=""
-          [ -n "$RESOURCE_GROUP" ] || missing="AZURE_RESOURCE_GROUP"
-          [ -n "$CONTAINER_APP" ] || missing="${missing:+${missing}, }AZURE_CONTAINER_APP"
-          if [ -n "$missing" ]; then
-            echo "::error::Deployment target not configured - unset variable(s): ${missing}. Add them under Settings -> Secrets and variables -> Actions -> Variables (see docs/GITHUB_SETUP.md)."
-            exit 1
-          fi
-      # Federated sign-in: GitHub mints a short-lived token and Azure trades
-      # it for an access token. No client secret exists, so there is nothing
-      # here to leak or rotate. The three values are identifiers rather than
-      # credentials; they live in secrets by convention, not necessity.
-      - name: Sign in to Azure
-        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3.0.1
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      # `az containerapp` is an extension, and the runner image's preinstalled
-      # extension set is not something to depend on. Adding it explicitly also
-      # sidesteps az's dynamic-install prompt, which has nobody to answer it.
-      - name: Install the containerapp extension
-        run: az extension add --name containerapp --upgrade --only-show-errors
-      # Reads the deployment target's own ingress rather than restating it
-      # here, so the two cannot drift, and refuses to deploy into a shape that
-      # would fail silently. Each check below is a failure this app has a
-      # documented way of producing.
-      - name: Resolve the ingress and check its shape
-        id: target
-        run: |
-          set -euo pipefail
-          ingress=$(az containerapp show \
-            --name "$CONTAINER_APP" --resource-group "$RESOURCE_GROUP" \
-            --query properties.configuration.ingress --output json \
-            --only-show-errors)
-          if [ -z "$ingress" ] || [ "$ingress" = "null" ]; then
-            echo "::error::${CONTAINER_APP} has no ingress - nothing can reach the app. See docs/GITHUB_SETUP.md."
-            exit 1
-          fi
-          # The image listens on 8000 (UVICORN_PORT in .devcontainer/Dockerfile).
-          # A mismatch here means ingress accepts traffic and forwards it to a
-          # closed port, so every request fails while the revision looks healthy.
-          port=$(jq -r '.targetPort' <<<"$ingress")
-          if [ "$port" != "8000" ]; then
-            echo "::error::Ingress targetPort is ${port}; the image listens on 8000. Fix it once: az containerapp ingress update --name ${CONTAINER_APP} --resource-group ${RESOURCE_GROUP} --target-port 8000"
-            exit 1
-          fi
-          # In multiple-revision mode a new revision is created with no traffic
-          # weight, so the deploy below would be a silent no-op: the probes at
-          # the end would pass against the *old* revision and the run would go
-          # green having changed nothing anyone can reach.
-          mode=$(az containerapp show \
-            --name "$CONTAINER_APP" --resource-group "$RESOURCE_GROUP" \
-            --query properties.configuration.activeRevisionsMode \
-            --output tsv --only-show-errors)
-          if [ "$mode" != "Single" ]; then
-            echo "::error::Active revision mode is ${mode}; this job assumes Single, where the new revision takes all traffic. Splitting traffic needs an explicit 'az containerapp ingress traffic set' step here."
-            exit 1
-          fi
-          # An internal ingress still gets an FQDN, but one that resolves only
-          # inside the environment's network - the probe at the end of this
-          # job would hang against it and the environment URL would point
-          # somewhere nobody can open.
-          if [ "$(jq -r '.external' <<<"$ingress")" != "true" ]; then
-            echo "::error::Ingress is internal; this job deploys a public site and probes it over the internet. Make it external, or drop the probe step and the environment URL."
-            exit 1
-          fi
-          # `jq -r` renders a JSON null as the four characters "null", so an
-          # absent FQDN would otherwise flow on as a real-looking value: the
-          # environment URL becomes https://null and the probe fails against
-          # a name that does not resolve. The host list built from it comes
-          # out empty instead, because join() renders null as nothing - and
-          # an empty WEBSITE_TRUSTED_HOSTS makes the app refuse to boot, so
-          # the run would fail several minutes later as a crash-looping
-          # revision, naming nothing that points back here. `// empty` turns
-          # both into an empty string this catches immediately.
-          fqdn=$(jq -r '.fqdn // empty' <<<"$ingress")
-          if [ -z "$fqdn" ]; then
-            echo "::error::Ingress reports no FQDN, so there is no address to trust or to probe. Check that ingress finished provisioning on ${CONTAINER_APP}."
-            exit 1
-          fi
-          # Every name a visitor can reach the site by has to be in the app's
-          # Host allowlist, or it answers 400 (see "Trusted hosts" in
-          # docs/ARCHITECTURE.md). Deriving the list from the ingress means
-          # binding a custom domain does not silently take the site down on
-          # the next release. customDomains is null when none are bound.
-          #
-          # The select() drops a null or empty custom-domain name rather than
-          # letting it reach the allowlist: the app strips empty entries
-          # itself, but a literal "null" would become a trusted host named
-          # null. Deliberately not `unique` - that sorts, which would move the
-          # FQDN out of first place in the log line for no gain, and a
-          # duplicate host is harmless to TrustedHostMiddleware anyway.
-          hosts=$(jq -r '[.fqdn] + [(.customDomains // [])[].name] | map(select(. != null and . != "")) | join(",")' <<<"$ingress")
-          echo "fqdn=${fqdn}" >> "$GITHUB_OUTPUT"
-          echo "hosts=${hosts}" >> "$GITHUB_OUTPUT"
-          echo "::notice::Deploying to ${fqdn} (trusted hosts: ${hosts})"
-      # By digest, never by tag: this is the exact artifact `verify` proved,
-      # and a tag could be repointed between that job and this one.
-      #
-      # --set-env-vars upserts the named variables and leaves the rest of the
-      # app's environment alone, so this owns the two settings the image
-      # cannot get right on its own and claims nothing else:
-      #
-      #   WEBSITE_TRUSTED_HOSTS - unset, the image trusts only localhost and
-      #     127.0.0.1, and every route except the probes answers 400.
-      #
-      #   UVICORN_FORWARDED_ALLOW_IPS - the image ships 127.0.0.1, and the
-      #     Envoy ingress in front of this container is never loopback, so the
-      #     default can never match it: the homepage would advertise an http://
-      #     canonical link for an https:// site and log Envoy's address as
-      #     every visitor's. QUICKSTART.md argues against `*` because a client
-      #     could then spoof X-Forwarded-For or X-Forwarded-Proto - but that
-      #     argument assumes clients can open connections to the container.
-      #     Container Apps does not route to the target port from outside;
-      #     Envoy is the only peer that can ever connect, and it has no stable
-      #     address to name instead. If this app is ever given a route that
-      #     bypasses ingress, this line stops being safe.
-      - name: Deploy the release
-        id: deploy
-        env:
-          IMAGE: ${{ needs.publish.outputs.image }}@${{ needs.publish.outputs.digest }}
-          TRUSTED_HOSTS: ${{ steps.target.outputs.hosts }}
-        run: |
-          set -euo pipefail
-          revision=$(az containerapp update \
-            --name "$CONTAINER_APP" --resource-group "$RESOURCE_GROUP" \
-            --image "$IMAGE" \
-            --set-env-vars \
-              "WEBSITE_TRUSTED_HOSTS=${TRUSTED_HOSTS}" \
-              "UVICORN_FORWARDED_ALLOW_IPS=*" \
-            --query properties.latestRevisionName --output tsv --only-show-errors)
-          echo "revision=${revision}" >> "$GITHUB_OUTPUT"
-          echo "::notice::Created revision ${revision} from ${IMAGE}"
-      # `az containerapp update` returns once the revision is *created*, not
-      # once it runs. Without this wait the probes below would race the
-      # rollout and most likely answer from the outgoing revision.
-      - name: Wait for the revision to run
-        env:
-          REVISION: ${{ steps.deploy.outputs.revision }}
-        run: |
-          set -euo pipefail
-          for _ in $(seq 60); do
-            state=$(az containerapp revision show \
-              --name "$CONTAINER_APP" --resource-group "$RESOURCE_GROUP" \
-              --revision "$REVISION" --query properties.runningState \
-              --output tsv --only-show-errors)
-            case "$state" in
-              Running)
-                echo "::notice::${REVISION} is running."
-                exit 0
-                ;;
-              Failed | Degraded)
-                echo "::error::${REVISION} settled in state ${state}."
-                # The revision object carries provisioningError; it is
-                # available whether or not Log Analytics has caught up.
-                az containerapp revision show \
-                  --name "$CONTAINER_APP" --resource-group "$RESOURCE_GROUP" \
-                  --revision "$REVISION" --output json --only-show-errors || true
-                exit 1
-                ;;
-            esac
-            sleep 5
-          done
-          echo "::error::${REVISION} never reached Running within 5 minutes."
-          exit 1
-      # The deploy is not done until the public address serves the new image.
-      #
-      # /readyz on its own would not prove that: the probe routes are
-      # exempt from the Host allowlist, so they answer 200 even when
-      # WEBSITE_TRUSTED_HOSTS is wrong and every real page returns 400 - the
-      # single most likely way this deployment breaks. Probing the homepage
-      # too is what actually covers it, and it exercises the template render
-      # and static assets that a health check never touches.
-      - name: Probe the deployed site
-        env:
-          FQDN: ${{ steps.target.outputs.fqdn }}
-        run: |
-          set -euo pipefail
-          for path in /readyz /; do
-            url="https://${FQDN}${path}"
-            for attempt in $(seq 20); do
-              code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$url" || echo 000)
-              if [ "$code" = "200" ]; then
-                echo "::notice::${url} -> 200"
-                break
-              fi
-              if [ "$attempt" = "20" ]; then
-                echo "::error::${url} answered ${code}, not 200. A 400 here with a healthy /readyz means WEBSITE_TRUSTED_HOSTS does not cover ${FQDN}."
-                exit 1
-              fi
-              sleep 3
-            done
-          done
+    # Named one by one rather than `secrets: inherit`, which would hand the
+    # called workflow every secret in the repository.
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}

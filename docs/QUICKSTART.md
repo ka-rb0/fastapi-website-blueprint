@@ -52,6 +52,11 @@ image; no second command is needed.
   LAN? The phone addresses the site by this machine's LAN IP, so add that
   IP - not the phone's - or use `"*"` while developing (see
   `.devcontainer/.env.example`).
+  Entries are ASCII host names without a scheme, port or path; DNS names are
+  matched case-insensitively. Wildcards have the form `*.example.com` (or
+  `"*"` to disable the guard). Starlette's matcher does not currently support
+  IPv6 literals, so invalid or unsupported patterns fail at startup instead
+  of producing an allowlist that rejects every request.
 - Request bodies are capped at 1 MB with a 413 (`Settings.max_body_bytes` in
   `src/app/config.py`, overridable via `WEBSITE_MAX_BODY_BYTES`). The app
   rejects an oversized declared `Content-Length` before routing and counts
@@ -78,6 +83,33 @@ image; no second command is needed.
   themselves stay in code - `TEXT_LOG_FORMAT` and `JSON_LOG_FIELDS` in
   `src/app/observability.py` - because they are the log schema your
   dashboards match on; edit them there to add or rename a field.
+- OpenTelemetry traces and metrics are **off until you name a collector**:
+  set `OTEL_EXPORTER_OTLP_ENDPOINT` (e.g. `http://collector:4318`) and
+  `OTEL_SERVICE_NAME`, and the app exports the standard HTTP semantics -
+  `http.server.request.duration`, `http.server.active_requests`, one server
+  span per request carrying `http.route` and the request's `X-Request-ID`.
+  Both variables are required together: telemetry with no service name would
+  arrive as `unknown_service`, so the app refuses to start instead. Everything
+  else is the SDK's own vocabulary and needs no code change - sample down with
+  `OTEL_TRACES_SAMPLER`/`OTEL_TRACES_SAMPLER_ARG`, add resource attributes with
+  `OTEL_RESOURCE_ATTRIBUTES`, silence it fleet-wide with `OTEL_SDK_DISABLED=true`.
+  Only OTLP over HTTP/protobuf is installed, so leave
+  `OTEL_EXPORTER_OTLP_PROTOCOL` unset or set it to `http/protobuf`; `grpc`
+  fails at startup rather than exporting into the void. The probe routes are
+  never traced (they would outnumber real traffic); add your own exclusions
+  with `OTEL_PYTHON_EXCLUDED_URLS` and they are added to that, not swapped for
+  it. JSON log lines gain `trace_id`/`span_id` while a request is being traced,
+  which is how a backend joins a log line to its trace - see "Telemetry" in
+  [ARCHITECTURE.md](ARCHITECTURE.md).
+- The dev container ships an OpenTelemetry Collector, and the `proxy-backend`
+  service already exports to it: browse
+  `https://proxy.localhost:$WEBSITE_PROXY_HTTPS_PORT$UVICORN_ROOT_PATH/` and
+  watch the spans and metrics arrive with
+  `docker compose logs -f otel-collector`. It prints them (
+  `.devcontainer/otel-collector.yaml`, `exporters.debug`); point that file at a
+  real backend and nothing in the app changes. The direct dev server is off by
+  default because the test suite inherits its environment - uncomment the two
+  `OTEL_*` lines in `.devcontainer/.env` to include it.
 - Importing `app.main` claims process-wide logging, so **the root and Uvicorn
   portions of `uvicorn --log-config` are silently overridden** when you serve
   `app.main:app`; explicitly named non-Uvicorn loggers may retain their

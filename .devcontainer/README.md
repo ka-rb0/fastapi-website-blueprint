@@ -71,7 +71,32 @@ https://proxy.localhost:$WEBSITE_PROXY_HTTPS_PORT
   └──→ Caddy
        └── strips $UVICORN_ROOT_PATH
            └──→ proxy-backend:$WEBSITE_PROXY_BACKEND_PORT
+                └──→ otel-collector:4318 (OTLP/HTTP)
 ```
+
+## Development telemetry collector
+
+Compose also starts an OpenTelemetry Collector, and the proxy backend exports
+to it by default - the one service that does, so the feature is reachable
+without editing anything. Watch what arrives:
+
+```bash
+docker compose logs -f otel-collector
+```
+
+Its whole configuration is [otel-collector.yaml](otel-collector.yaml), mounted
+onto the path the image already reads. Sending telemetry somewhere real is an
+edit to the `exporters` section of that file - the `contrib` distribution
+already carries every vendor's exporter, so it is never an image change.
+
+`master` deliberately does **not** export by default: it is the container that
+runs the test suite, and the suite's servers inherit its environment. Set
+`OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_SERVICE_NAME` in `.env` to trace the
+direct development server too, or to send everything to a collector of your own
+instead of this one (see [.env.example](.env.example)).
+
+Like Caddy, the collector is independent: nothing depends on it, and removing
+the service leaves the application serving.
 
 ## Refresh the agent CLIs
 

@@ -107,6 +107,15 @@ def test_only_a_trusted_host_reaches_the_canonical_link(
     )
 
 
+def test_host_matching_is_case_insensitive(trusted_hosts_server: str) -> None:
+    """DNS host names match regardless of their presentation case."""
+    request = _get_with_host(trusted_hosts_server, "SITE.EXAMPLE")
+    with urllib.request.urlopen(request, timeout=5) as resp:
+        assert resp.status == 200
+        origins = _generated_origins(resp.read().decode())
+    assert origins == {("http", "site.example")}
+
+
 def test_configured_allowlist_replaces_default(trusted_hosts_server: str) -> None:
     """WEBSITE_TRUSTED_HOSTS replaces the default - it doesn't extend it."""
     request = _get_with_host(trusted_hosts_server, "localhost")

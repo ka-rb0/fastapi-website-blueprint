@@ -20,6 +20,17 @@ dependencies = [
   "fastapi>=0.140.13",
   "jinja2>=3.1.6",
   "uvicorn[standard]>=0.52.1",
+  # OpenTelemetry. Inert until a collector endpoint is configured (see
+  # "Telemetry" in docs/ARCHITECTURE.md), but always installed: the API
+  # package is what lets src/app/observability.py stamp trace IDs onto log
+  # records with no import guard, because it is a documented no-op while no
+  # SDK is installed - which is exactly the state of a default deployment.
+  # Only the HTTP/protobuf OTLP exporter is pulled in; the gRPC one would add
+  # grpcio to every image for a transport an ingress cannot route.
+  "opentelemetry-api>=1.44.0",
+  "opentelemetry-sdk>=1.44.0",
+  "opentelemetry-exporter-otlp-proto-http>=1.44.0",
+  "opentelemetry-instrumentation-fastapi>=0.65b0",
 ]
 
 [dependency-groups]

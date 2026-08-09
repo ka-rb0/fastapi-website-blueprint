@@ -42,6 +42,16 @@ services:
       PYTHONDONTWRITEBYTECODE: 1
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: ${LOG_FORMAT:-text}
+      # OpenTelemetry is off while these are empty, which is the default (see
+      # "Telemetry" in docs/ARCHITECTURE.md). Deliberately *not* defaulted to
+      # the otel-collector service below, the way proxy-backend is: this
+      # container also runs the test suite, whose servers inherit this
+      # environment, and a suite whose behavior depends on whether a sidecar
+      # happens to be up is a suite that fails for the wrong reasons. Point
+      # both at the collector in .devcontainer/.env to trace the direct
+      # development server too - see .env.example.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-}
       DATA_PATH: ${DATA_PATH}
       # Native server settings for the direct development listener. Proxy-only
       # settings belong to the separate proxy-backend service below, so no
@@ -98,6 +108,17 @@ services:
       PYTHONDONTWRITEBYTECODE: 1
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: ${LOG_FORMAT:-json}
+      # The one service that exports by default, so the feature is reachable
+      # without editing anything: unset, it dials the otel-collector service
+      # below, and the URL's port is pinned against the port that collector's
+      # config binds by tests/test_telemetry.py - the two are written in
+      # different syntaxes and cannot be one string. Setting the variable in
+      # .devcontainer/.env sends this backend to a collector of your own
+      # instead. A service name is required whenever an endpoint is set (the
+      # app refuses to boot exporting as "unknown_service"), which is why this
+      # one carries a default rather than the empty pass-through above.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-fastapi-website-blueprint}
       UVICORN_HOST: 0.0.0.0
       UVICORN_PORT: ${WEBSITE_PROXY_BACKEND_PORT:?set it in .devcontainer/.env, see .env.example}
       UVICORN_RELOAD: "true"
@@ -112,6 +133,36 @@ services:
     cap_drop:
       - NET_RAW
     command: ["uvicorn", "app.main:app"]
+    networks:
+      - fastapi-website-blueprint-network
+
+  # Where the telemetry the application exports actually lands in development.
+  # Independent of everything else, like Caddy below: nothing depends_on it,
+  # and removing this service only turns proxy-backend's export into retries
+  # against a name that no longer resolves - the app keeps serving, because
+  # telemetry is a diagnostic and never a request path.
+  otel-collector:
+    # The contrib distribution rather than the core one, because the reason to
+    # run a collector at all is that swapping `debug` for a real backend is a
+    # config edit: contrib is the build that already contains the vendor
+    # exporters, so that edit never becomes an image change. Tag and
+    # multi-platform digest are Dependabot-managed, like every other image here.
+    image: otel/opentelemetry-collector-contrib:0.158.0@sha256:c5918f78992ee73b0d6f0e599423ac5ec52dd5d9726733114d6eca53d5a32ed5
+    init: true
+    volumes:
+      # No `command:` beside this: /etc/otelcol-contrib/config.yaml is the path
+      # the image's own CMD already passes to the binary, so mounting onto it
+      # is the whole configuration step.
+      - ./otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    # Deliberately publishes nothing. The collector is reachable by service
+    # name from the Compose network, which is all any sender here needs, and an
+    # OTLP receiver on a host port would accept telemetry from anything on the
+    # machine. Read what it collected with
+    # `docker compose logs -f otel-collector`.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     networks:
       - fastapi-website-blueprint-network
 

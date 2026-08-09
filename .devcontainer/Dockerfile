@@ -144,6 +144,15 @@ ENV PYTHONUNBUFFERED=1
 # Override with `-e LOG_FORMAT=text` to read `docker logs` by hand.
 ENV LOG_FORMAT=json
 
+# No OTEL_* defaults on purpose, which is what keeps traces and metrics off in
+# an image that may be run anywhere. A deployment turns them on with
+# `-e OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318 -e OTEL_SERVICE_NAME=<name>`
+# and no code change; both are required together, because telemetry exported
+# without a service name arrives as "unknown_service" and the app refuses to
+# start rather than send it (see "Telemetry" in docs/ARCHITECTURE.md).
+# Baking a default service name here would defeat that check by naming every
+# deployment after this template.
+
 # Uvicorn's public environment interface is the distribution image's one
 # server-configuration contract. Keeping these as UVICORN_* values means the
 # image, the development proxy backend and a bare `uvicorn app.main:app` all

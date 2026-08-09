@@ -21,7 +21,7 @@ import urllib.request
 
 import pytest
 
-from app.middleware import DOCS_CSP
+from app.middleware import DOCS_COOP, DOCS_CSP
 
 # Every static asset the pages reference, by prefix-relative path.
 ASSETS = (
@@ -90,9 +90,11 @@ def test_unknown_api_path_stays_json_under_a_prefix(prefixed_server: str) -> Non
     assert excinfo.value.headers["Content-Type"] == "application/json"
 
 
-def test_docs_gets_relaxed_csp_under_a_prefix(prefixed_server: str) -> None:
+def test_docs_gets_relaxed_browser_policies_under_a_prefix(
+    prefixed_server: str,
+) -> None:
     """
-    /docs still gets DOCS_CSP when the app runs under --root-path.
+    /docs still gets its browser-policy exceptions under --root-path.
 
     Regression test: uvicorn's --root-path folds the prefix into
     scope["path"] itself (a request the app sees as "/docs" arrives with
@@ -105,3 +107,4 @@ def test_docs_gets_relaxed_csp_under_a_prefix(prefixed_server: str) -> None:
     with urllib.request.urlopen(f"{prefixed_server}/docs", timeout=5) as resp:
         assert resp.status == 200
         assert resp.headers["Content-Security-Policy"] == DOCS_CSP
+        assert resp.headers["Cross-Origin-Opener-Policy"] == DOCS_COOP

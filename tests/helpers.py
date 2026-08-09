@@ -1,13 +1,16 @@
 """Shared helpers for tests that drive the factory-built stack or read pages."""
 
+import asyncio
 import json
 import re
 import urllib.parse
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
+import yaml
 from fastapi import FastAPI
+from starlette.types import ASGIApp, Message, Scope
 
 from app.middleware import (
     BodySizeLimitMiddleware,
@@ -15,7 +18,111 @@ from app.middleware import (
     SecurityHeadersMiddleware,
 )
 
-DOCKERFILE = Path(__file__).parent.parent / ".devcontainer" / "Dockerfile"
+DEVCONTAINER_DIR = Path(__file__).parent.parent / ".devcontainer"
+DOCKERFILE = DEVCONTAINER_DIR / "Dockerfile"
+
+# A `${NAME:-fallback}` Compose interpolation, which PyYAML hands back
+# verbatim: Compose resolves these, a structural parse cannot.
+COMPOSE_INTERPOLATION = re.compile(r"\$\{(?P<name>\w+):-(?P<default>.*)\}")
+
+
+def devcontainer_yaml(name: str) -> dict[str, Any]:
+    """
+    Parse one of the dev container's YAML files structurally.
+
+    PyYAML is a declared dependency (see pyproject.toml) specifically so tests
+    can assert on service names, keys and image strings instead of raw text,
+    which stays correct across reordering or reformatting that raw text
+    wouldn't survive.
+    """
+    parsed: dict[str, Any] = yaml.safe_load((DEVCONTAINER_DIR / name).read_text())
+    return parsed
+
+
+def compose_config() -> dict[str, Any]:
+    """Return the parsed `docker-compose.yml`."""
+    return devcontainer_yaml("docker-compose.yml")
+
+
+def compose_services() -> dict[str, Any]:
+    """Return `docker-compose.yml`'s `services` mapping."""
+    services: dict[str, Any] = compose_config()["services"]
+    return services
+
+
+def compose_default(value: str) -> str:
+    """
+    Return the fallback of a `${NAME:-fallback}` Compose interpolation.
+
+    Asserting rather than tolerating a plain literal: a default read out of a
+    value that has no interpolation around it would silently also be asserting
+    that the setting cannot be overridden from `.env`.
+    """
+    match = COMPOSE_INTERPOLATION.fullmatch(value)
+    assert match, f"{value!r} is not a Compose interpolation with a default"
+    return match["default"]
+
+
+class DrivenResponse(NamedTuple):
+    """What one request driven through an ASGI app answered with."""
+
+    status: int
+    headers: dict[str, str]
+    body: bytes
+
+
+def drive_get(application: ASGIApp, path: str, *, host: str) -> DrivenResponse:
+    """
+    Drive one GET through an ASGI app without a server or global environment.
+
+    The in-process counterpart to the live-server fixtures in conftest.py: it
+    exercises the real wrapper stack a factory built, so a configuration
+    variant that needs no server behavior needs no port either (see "Testing
+    strategy" in docs/ARCHITECTURE.md).
+    """
+    messages: list[Message] = []
+    request_sent = False
+
+    async def receive() -> Message:
+        nonlocal request_sent
+        if request_sent:
+            return {"type": "http.disconnect"}
+        request_sent = True
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: Message) -> None:
+        messages.append(message)
+
+    scope: Scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "root_path": "",
+        "headers": [(b"host", host.encode())],
+        "server": (host, 80),
+        "client": ("127.0.0.1", 12345),
+    }
+    asyncio.run(application(scope, receive, send))
+
+    start = next(
+        message for message in messages if message["type"] == "http.response.start"
+    )
+    return DrivenResponse(
+        status=start["status"],
+        headers={
+            name.decode().lower(): value.decode() for name, value in start["headers"]
+        },
+        body=b"".join(
+            message.get("body", b"")
+            for message in messages
+            if message["type"] == "http.response.body"
+        ),
+    )
 
 
 def distribution_entrypoint() -> list[str]:

@@ -16,20 +16,20 @@ import urllib.request
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
 
 import pytest
-import yaml
 
 from .conftest import SRC_DIR, next_test_port, run_server_command
 from .helpers import (
+    DEVCONTAINER_DIR,
+    compose_config,
+    compose_services,
     distribution_entrypoint,
     distribution_environment,
     emitted_urls,
 )
 
 REPO_ROOT = Path(__file__).parent.parent
-DEVCONTAINER_DIR = REPO_ROOT / ".devcontainer"
 
 REVERSE_PROXY_VARIABLES = {
     "WEBSITE_PROXY_HTTP_PORT",
@@ -102,36 +102,15 @@ def test_reverse_proxy_example_environment_is_complete() -> None:
     )
 
 
-def _compose() -> dict[str, Any]:
-    """
-    Parse docker-compose.yml structurally.
-
-    PyYAML is a declared dependency (see pyproject.toml) specifically so this
-    file can assert on the parsed config - service names, keys, image
-    strings - instead of raw text, which stays correct across reordering or
-    reformatting that raw text wouldn't survive.
-    """
-    compose: dict[str, Any] = yaml.safe_load(
-        (DEVCONTAINER_DIR / "docker-compose.yml").read_text()
-    )
-    return compose
-
-
-def _compose_services() -> dict[str, Any]:
-    """Return docker-compose.yml's `services` mapping."""
-    services: dict[str, Any] = _compose()["services"]
-    return services
-
-
 def test_caddy_image_is_versioned_and_digest_pinned() -> None:
     """The added development dependency follows the repository's image policy."""
-    image = _compose_services()["caddy"]["image"]
+    image = compose_services()["caddy"]["image"]
     assert re.fullmatch(r"caddy:\d+\.\d+\.\d+-alpine@sha256:[0-9a-f]{64}", image)
 
 
 def test_caddy_is_independent_and_proxy_backend_stays_private() -> None:
     """The proxy topology cannot alter direct development or expose its backend."""
-    services = _compose_services()
+    services = compose_services()
     master = services["master"]
     backend = services["proxy-backend"]
     caddy = services["caddy"]
@@ -150,7 +129,7 @@ def test_caddy_is_independent_and_proxy_backend_stays_private() -> None:
 
 def test_reverse_proxy_trusted_ip_matches_caddys_pinned_address() -> None:
     """Uvicorn trusts exactly Caddy's pinned Compose-network address, not "*"."""
-    compose = _compose()
+    compose = compose_config()
     services = compose["services"]
     trusted_ip = services["proxy-backend"]["environment"]["UVICORN_FORWARDED_ALLOW_IPS"]
     assert trusted_ip != "*"
@@ -199,7 +178,7 @@ def test_caddy_compresses_responses() -> None:
 
 def test_compose_trusts_the_proxy_host() -> None:
     """The proxy backend's host allowlist includes Caddy's public site name."""
-    environment = _compose_services()["proxy-backend"]["environment"]
+    environment = compose_services()["proxy-backend"]["environment"]
     trusted = environment["WEBSITE_TRUSTED_HOSTS"]
     assert "proxy.localhost" in trusted
 

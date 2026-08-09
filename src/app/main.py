@@ -3,6 +3,7 @@
 from .config import Settings
 from .factory import create_app
 from .observability import configure_logging
+from .telemetry import configure_telemetry
 
 # Environment loading belongs at the executable boundary. Importing
 # ``app.factory`` remains side-effect free, while ``uvicorn app.main:app``
@@ -17,6 +18,13 @@ settings = Settings.from_env()
 # A host that never imports app.main keeps its own logging, and can opt in by
 # calling configure_logging itself (see docs/ARCHITECTURE.md).
 configure_logging(settings.log_level, settings.log_format)
+
+# The same boundary and the same reasoning: tracer and meter providers are one
+# per process, so claiming them is the entry point's business, not a library's.
+# A no-op unless a collector endpoint is configured, and it runs before
+# create_app so the application is instrumented against providers that already
+# exist (see docs/ARCHITECTURE.md).
+configure_telemetry(settings)
 
 app = create_app(settings)
 

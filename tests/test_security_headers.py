@@ -16,7 +16,12 @@ from starlette.types import Message, Receive, Scope, Send
 
 from app.config import Settings
 from app.factory import create_app
-from app.middleware import DOCS_CSP, SECURITY_HEADERS, SecurityHeadersMiddleware
+from app.middleware import (
+    DOCS_COOP,
+    DOCS_CSP,
+    SECURITY_HEADERS,
+    SecurityHeadersMiddleware,
+)
 from tests.helpers import framework_app
 
 
@@ -56,6 +61,12 @@ def test_docs_csp_relaxes_exactly_scripts_styles_connects_and_images() -> None:
     assert docs.pop("img-src") == "'self' data: https://fastapi.tiangolo.com"
     del base["script-src"], base["style-src"], base["connect-src"], base["img-src"]
     assert docs == base
+
+
+def test_docs_opener_policy_supports_oauth_popups() -> None:
+    """Swagger's cross-origin OAuth popup must retain window.opener."""
+    assert SECURITY_HEADERS["Cross-Origin-Opener-Policy"] == "same-origin"
+    assert DOCS_COOP == "same-origin-allow-popups"
 
 
 async def _crashing_app(scope: Scope, receive: Receive, send: Send) -> None:

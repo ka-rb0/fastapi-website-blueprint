@@ -13,6 +13,7 @@ from .middleware import (
     SecurityHeadersMiddleware,
 )
 from .routers import PROBE_PATHS, api_router, create_pages_router, probes_router
+from .telemetry import instrument_app
 from .templating import STATIC_DIR, create_templates
 
 APP_TITLE = "FastAPI Website Blueprint"
@@ -60,6 +61,19 @@ def create_app(settings: Settings) -> RequestIDMiddleware:
     # all-static frontend - misses must raise 404s that the branded handler
     # (see app.exceptions) turns into the branded page.
     fastapi_app.mount("/", StaticFiles(directory=STATIC_DIR), name="static")
+
+    # Inside the framework rather than beside the wrappers below, because a
+    # server span is only worth its cost with the matched route on it and
+    # nothing outside FastAPI knows which route a request will reach. Skipped
+    # entirely when no collector is configured, so the default deployment
+    # carries no instrumentation at all - see "Telemetry" in
+    # docs/ARCHITECTURE.md.
+    if settings.telemetry_enabled:
+        instrument_app(
+            fastapi_app,
+            exempt_paths=PROBE_PATHS,
+            excluded_urls=settings.telemetry_excluded_urls,
+        )
 
     # Wrapper order is load-bearing - correlation outermost, so nothing below
     # can log or answer without an ID, then headers, so even the body guard's

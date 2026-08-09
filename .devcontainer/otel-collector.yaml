@@ -1,0 +1,58 @@
+# Development OpenTelemetry Collector.
+#
+# The point of running one here rather than pointing the app straight at a
+# vendor is that this is what a real deployment looks like: the app speaks OTLP
+# to a collector it can reach, and the collector decides where telemetry
+# actually goes. Swapping the `debug` exporter below for a real backend
+# (Grafana Cloud, Honeycomb, Datadog, an OTLP gateway) is then an edit to this
+# file alone - no application change, and no image change either, because the
+# contrib distribution already carries every vendor exporter.
+#
+# Mounted at /etc/otelcol-contrib/config.yaml, which is the path the image's
+# own CMD already passes to the binary, so the Compose service needs no command
+# override.
+
+receivers:
+  otlp:
+    protocols:
+      # HTTP/protobuf only, deliberately: it is the one transport the
+      # application ships an exporter for (see "Telemetry" in
+      # ../docs/ARCHITECTURE.md), and a receiver listening for a protocol
+      # nothing sends is a port open for no reason. The address must be
+      # 0.0.0.0 rather than the default localhost - the senders are other
+      # containers on the Compose network, so a loopback bind would refuse
+      # every one of them. tests/test_telemetry.py pins this port against the
+      # endpoint Compose hands the application.
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # What every non-toy pipeline starts with: it amortizes export over batches
+  # instead of per-span round trips. Kept here even though the debug exporter
+  # below could not care, because the value of this file is showing the shape a
+  # deployment copies.
+  batch: {}
+
+exporters:
+  # Prints what arrives to the collector's own stdout, which is what makes
+  # `docker compose logs -f otel-collector` the local trace viewer. `normal`
+  # gives one line per span - its name, trace and span IDs, and every
+  # attribute, request.id included, so a line found in the application's log
+  # and the span it belongs to can be read side by side. `detailed` is more
+  # verbose still and worth switching to only while debugging the
+  # instrumentation itself.
+  debug:
+    verbosity: normal
+
+service:
+  # Both signals, because the application emits both and a pipeline that
+  # dropped one would look exactly like instrumentation that never produced it.
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]

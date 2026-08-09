@@ -60,6 +60,18 @@ image; no second command is needed.
   that never read them. Per-field limits like the shout form's `maxlength`
   only apply after a whole body has been received, so raise either limit
   deliberately when an endpoint needs more.
+- Each client address gets 240 requests per minute per replica, refilling
+  continuously, and anything past that is a 429 carrying `Retry-After`
+  (`Settings.rate_limit_per_minute`, overridable via
+  `WEBSITE_RATE_LIMIT_PER_MINUTE`; `0` turns it off for a deployment whose
+  ingress already limits). The allowance is deliberately generous because a
+  page load spends one request per asset, so it bounds abuse without any
+  visitor noticing it. Two things decide whether it works as intended: the
+  limit is per replica, and the client it charges is whatever
+  `--forwarded-allow-ips` leaves in place - behind a proxy that is not named
+  there, every request looks like it came from the proxy and the whole site
+  shares one allowance (see "Rate limit" in [ARCHITECTURE.md](ARCHITECTURE.md)).
+  The probe routes are exempt, like they are from the host check.
 - Every response carries an `X-Request-ID`, and every log line prints it in
   brackets - uvicorn's access line included, so one ID finds the request and
   everything the app logged while handling it. Send the header yourself (or

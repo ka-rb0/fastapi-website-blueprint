@@ -6,7 +6,12 @@ import pytest
 from starlette.routing import Mount, Route
 from starlette.types import ASGIApp, Message, Scope
 
-from app.config import DEFAULT_MAX_BODY_BYTES, DEFAULT_TRUSTED_HOSTS, Settings
+from app.config import (
+    DEFAULT_MAX_BODY_BYTES,
+    DEFAULT_RATE_LIMIT_PER_MINUTE,
+    DEFAULT_TRUSTED_HOSTS,
+    Settings,
+)
 from app.factory import create_app
 from app.middleware import DOCS_CSP, SECURITY_HEADERS
 from app.observability import LogFormat
@@ -131,6 +136,7 @@ def test_settings_load_and_normalize_environment_values() -> None:
             "WEBSITE_ENABLE_DOCS": "1",
             "WEBSITE_TRUSTED_HOSTS": " site.example, *.internal.example ",
             "WEBSITE_MAX_BODY_BYTES": "4096",
+            "WEBSITE_RATE_LIMIT_PER_MINUTE": "60",
             "LOG_LEVEL": "debug",
             "LOG_FORMAT": "JSON",
         }
@@ -140,6 +146,7 @@ def test_settings_load_and_normalize_environment_values() -> None:
         docs_enabled=True,
         trusted_hosts=("site.example", "*.internal.example"),
         max_body_bytes=4_096,
+        rate_limit_per_minute=60,
         log_level="DEBUG",
         log_format=LogFormat.JSON,
     )
@@ -149,6 +156,7 @@ def test_settings_defaults_are_production_safe() -> None:
     assert Settings.from_env({}) == Settings(
         trusted_hosts=DEFAULT_TRUSTED_HOSTS,
         max_body_bytes=DEFAULT_MAX_BODY_BYTES,
+        rate_limit_per_minute=DEFAULT_RATE_LIMIT_PER_MINUTE,
     )
 
 
@@ -156,6 +164,19 @@ def test_from_env_names_the_variable_for_a_non_integer_body_cap() -> None:
     """The parse error names WEBSITE_MAX_BODY_BYTES, not just "invalid literal"."""
     with pytest.raises(ValueError, match=r"WEBSITE_MAX_BODY_BYTES.*'1MB'"):
         Settings.from_env({"WEBSITE_MAX_BODY_BYTES": "1MB"})
+
+
+def test_from_env_names_the_variable_for_a_non_integer_rate_limit() -> None:
+    """A rate spelled as a rate ("60/min") names the variable it came from."""
+    with pytest.raises(ValueError, match=r"WEBSITE_RATE_LIMIT_PER_MINUTE.*'60/min'"):
+        Settings.from_env({"WEBSITE_RATE_LIMIT_PER_MINUTE": "60/min"})
+
+
+def test_from_env_accepts_an_explicitly_disabled_rate_limit() -> None:
+    """0 is a value, not a missing one - the opt-out for an ingress that limits."""
+    assert Settings.from_env({"WEBSITE_RATE_LIMIT_PER_MINUTE": "0"}) == Settings(
+        rate_limit_per_minute=0
+    )
 
 
 def test_from_env_rejects_an_unknown_log_format() -> None:
@@ -188,6 +209,7 @@ def test_from_env_accepts_explicit_docs_off(value: str) -> None:
     [
         ({"trusted_hosts": ("", " ")}, "trusted_hosts"),
         ({"max_body_bytes": 0}, "max_body_bytes"),
+        ({"rate_limit_per_minute": -1}, "rate_limit_per_minute"),
         ({"log_level": "verbose"}, "log level"),
     ],
 )

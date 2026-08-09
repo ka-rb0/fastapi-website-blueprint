@@ -36,6 +36,14 @@ https://proxy.localhost {
 		max_size 1MB
 	}
 
+	# No rate limiting here, deliberately: Caddy's `rate_limit` ships in no
+	# standard build - it is a third-party module requiring an xcaddy image,
+	# which this file's pinned upstream digest is worth more than. The app
+	# enforces its own per-client limit instead (see "Rate limit" in
+	# docs/ARCHITECTURE.md), so unlike compression above, nothing is missing
+	# from a directly exposed container here. An ingress that does limit
+	# should still do so; the tighter of the two wins.
+
 	# Keep the canonical public root path slash-terminated.
 	@root_path path {$UVICORN_ROOT_PATH}
 	redir @root_path {$UVICORN_ROOT_PATH}/ 308

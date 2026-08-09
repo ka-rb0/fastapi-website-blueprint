@@ -212,6 +212,15 @@ ENV UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN=20
 # back after --timeout-keep-alive (5s by default). Set it too low and ordinary
 # traffic gets 503s, so raise it (or add replicas) rather than trimming it to
 # the request rate.
+#
+# This is backpressure, not rate limiting, and the difference is not a
+# nuance: a single client on a single keep-alive connection occupies one slot
+# while issuing requests forever. What bounds *that* is the app's own
+# per-client limit (Settings.rate_limit_per_minute, overridable with
+# WEBSITE_RATE_LIMIT_PER_MINUTE; see "Rate limit" in docs/ARCHITECTURE.md),
+# which is in the app precisely because this image is expected to be exposed
+# with no proxy of its own. No ENV line for it here, so the one number a
+# reader has to trust is the code's default.
 ENV UVICORN_LIMIT_CONCURRENCY=512
 
 # Don't advertise the server software. Uvicorn sends `Server: uvicorn` by

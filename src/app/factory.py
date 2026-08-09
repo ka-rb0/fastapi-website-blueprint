@@ -9,6 +9,7 @@ from .lifecycle import create_lifespan
 from .middleware import (
     BodySizeLimitMiddleware,
     HostValidationMiddleware,
+    RateLimitMiddleware,
     RequestIDMiddleware,
     SecurityHeadersMiddleware,
 )
@@ -67,7 +68,16 @@ def create_app(settings: Settings) -> RequestIDMiddleware:
     body_limited_app = BodySizeLimitMiddleware(
         fastapi_app, max_body_bytes=settings.max_body_bytes
     )
+    # Above the body guard, so a flood is turned away before any of it is
+    # counted or read. The probe exemption is the same list and the same
+    # reasoning as the Host allowlist's above - an orchestrator's polling must
+    # not be what exhausts its own limit.
+    rate_limited_app = RateLimitMiddleware(
+        body_limited_app,
+        requests_per_minute=settings.rate_limit_per_minute,
+        exempt_paths=PROBE_PATHS,
+    )
     header_stamped_app = SecurityHeadersMiddleware(
-        body_limited_app, docs_enabled=settings.docs_enabled
+        rate_limited_app, docs_enabled=settings.docs_enabled
     )
     return RequestIDMiddleware(header_stamped_app)

@@ -1,7 +1,10 @@
 """ASGI middleware wrapping FastAPI's stack, plus the host guard inside it."""
 
 import posixpath
+from collections import OrderedDict
 from collections.abc import Iterable
+from math import ceil
+from time import monotonic
 
 # _utils is private, but get_route_path is the exact function FastAPI's router
 # and StaticFiles use to remove root_path before matching. Importing it from
@@ -239,3 +242,128 @@ class BodySizeLimitMiddleware:
             return message
 
         await self.app(scope, guarded_receive, send)
+
+
+# The period the configured request count is spread over. A minute rather
+# than a second, so the setting reads as a rate a human can reason about
+# while the bucket below still refills continuously.
+RATE_LIMIT_WINDOW_SECONDS = 60.0
+
+# The most distinct clients tracked at once. This table is keyed on an
+# attacker-chosen value - the source address - so an uncapped one is itself
+# the memory-exhaustion vector the limiter exists to prevent: a spray from a
+# large address pool would grow it without bound. Sized for the per-replica
+# client population of a busy site, not for an attack; past it the least
+# recently seen client is evicted (see _consume).
+RATE_LIMIT_MAX_CLIENTS = 10_000
+
+
+class RateLimitMiddleware:
+    """
+    Cap how fast one client may issue requests, as a token bucket per address.
+
+    This is a different control from uvicorn's ``--limit-concurrency``, which
+    bounds *simultaneous* connections: one client on one connection can issue
+    unlimited sequential requests without ever tripping that ceiling. The
+    limit belongs in the app for the same reason the body cap does - the
+    distribution image runs uvicorn with no proxy of its own, and the
+    reference deployment's ingress has no rate limiting to delegate to (see
+    "Rate limit" in docs/ARCHITECTURE.md). An ingress that does limit should
+    keep doing so; two limits do not conflict, the tighter one wins.
+
+    Each client gets ``requests_per_minute`` tokens that refill continuously
+    at that rate, so a page load's burst of asset requests is spent at once
+    while the sustained rate stays bounded. ``0`` disables the limiter.
+
+    The client is ``scope["client"]``, which uvicorn's proxy-header handling
+    has already rewritten to the forwarded address when
+    ``--forwarded-allow-ips`` names the proxy. That makes this wrapper's
+    correctness depend on that setting being right: name no proxy and every
+    forwarded request is attributed to the proxy itself, i.e. one shared
+    bucket for the whole internet. Requests arriving with no client address at
+    all pass through - an address is the only identity available here, and
+    refusing what cannot be identified would refuse embedded and test
+    transports that set none.
+
+    Probe paths are exempt, like they are from the Host allowlist and for a
+    related reason: an orchestrator polls them on a fixed schedule from an
+    address it shares with nothing else, and a limited probe is a replica
+    restarted for being healthy. Paths are compared exactly, after
+    ``root_path`` is removed and without normalizing, so a dotted path cannot
+    normalize onto an exempt one and slip past the limit.
+    """
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        requests_per_minute: int,
+        exempt_paths: Iterable[str],
+    ) -> None:
+        """Wrap ``app``, limiting every path but ``exempt_paths``."""
+        self.app = app
+        self.requests_per_minute = requests_per_minute
+        self.exempt_paths = frozenset(exempt_paths)
+        self.refill_per_second = requests_per_minute / RATE_LIMIT_WINDOW_SECONDS
+        # client address -> (tokens left, when they were last refilled).
+        # Ordered so eviction can pick the least recently seen client.
+        self._buckets: OrderedDict[str, tuple[float, float]] = OrderedDict()
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        client = self._limited_client(scope)
+        if client is None:
+            await self.app(scope, receive, send)
+            return
+
+        retry_after = self._consume(client)
+        if retry_after is None:
+            await self.app(scope, receive, send)
+            return
+
+        # Hand-rolled like the body guard's pre-routing 413, and the same
+        # {"detail": ...} shape for the same reason: nothing framework-shaped
+        # has seen this request. Retry-After (RFC 9110) is the part a client
+        # can act on - without it, a polite caller has to guess and an
+        # impolite one keeps hammering the limit it just hit.
+        response = JSONResponse(
+            {"detail": "Rate limit exceeded"},
+            status_code=429,
+            headers={"Retry-After": str(retry_after)},
+        )
+        await response(scope, receive, send)
+
+    def _limited_client(self, scope: Scope) -> str | None:
+        """Return the address to charge this request to, or ``None`` to let it pass."""
+        if scope["type"] != "http" or not self.requests_per_minute:
+            return None
+        if get_route_path(scope) in self.exempt_paths:
+            return None
+        client = scope.get("client")
+        return client[0] if client else None
+
+    def _consume(self, client: str) -> int | None:
+        """Spend one token, or return the whole seconds until the next one refills."""
+        now = monotonic()
+        capacity = float(self.requests_per_minute)
+        # An absent client starts full, which is also why eviction below is
+        # lossless in practice: a bucket that has refilled to capacity holds
+        # exactly what a first-time client would be given anyway.
+        tokens, refilled_at = self._buckets.pop(client, (capacity, now))
+        tokens = min(capacity, tokens + (now - refilled_at) * self.refill_per_second)
+
+        allowed = tokens >= 1.0
+        if allowed:
+            tokens -= 1.0
+        # Reinserted last, so the first entry is always the least recently
+        # seen client. Nothing is awaited between the read above and this
+        # write, so the event loop cannot interleave another request's
+        # accounting into the middle of one bucket's update.
+        self._buckets[client] = (tokens, now)
+        if len(self._buckets) > RATE_LIMIT_MAX_CLIENTS:
+            self._buckets.popitem(last=False)
+
+        if allowed:
+            return None
+        # Rounded up, so the advertised moment is one a retry actually
+        # succeeds at rather than the instant before the token exists.
+        return ceil((1.0 - tokens) / self.refill_per_second)

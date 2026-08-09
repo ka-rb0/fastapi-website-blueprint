@@ -42,6 +42,15 @@ if PORT_MIN > PORT_MAX:
 
 _ports = itertools.count(PORT_MIN)
 
+# The rate limiter off, for every server a whole session's tests share. The
+# limiter keys on the source address, and every request the suite makes comes
+# from the loopback - so the suite is one client, and a browser-driven page
+# load spending a request per asset would make the shared servers 429 later
+# tests for traffic no real client produces. The limiter itself is covered
+# against a server of its own in tests/test_rate_limit.py; disabling it here
+# is what keeps that the only place its numbers are asserted.
+UNLIMITED = {"WEBSITE_RATE_LIMIT_PER_MINUTE": "0"}
+
 
 def next_test_port() -> int:
     """
@@ -227,7 +236,9 @@ def server() -> Generator[str]:
     # code's default, not whatever the shell carries (the dev container's
     # compose environment sets the variable).
     env = {k: v for k, v in os.environ.items() if k != "WEBSITE_TRUSTED_HOSTS"}
-    with run_server(next_test_port(), {**env, "WEBSITE_ENABLE_DOCS": "1"}) as base_url:
+    with run_server(
+        next_test_port(), {**env, **UNLIMITED, "WEBSITE_ENABLE_DOCS": "1"}
+    ) as base_url:
         yield base_url
 
 
@@ -249,7 +260,7 @@ def prefixed_server() -> Generator[str]:
     """
     with run_server(
         next_test_port(),
-        {**os.environ, "WEBSITE_ENABLE_DOCS": "1"},
+        {**os.environ, **UNLIMITED, "WEBSITE_ENABLE_DOCS": "1"},
         ("--root-path", "/prefix"),
     ) as base_url:
         yield base_url
@@ -270,6 +281,6 @@ def trusted_hosts_server() -> Generator[str]:
     """
     with run_server(
         next_test_port(),
-        {**os.environ, "WEBSITE_TRUSTED_HOSTS": "site.example"},
+        {**os.environ, **UNLIMITED, "WEBSITE_TRUSTED_HOSTS": "site.example"},
     ) as base_url:
         yield base_url

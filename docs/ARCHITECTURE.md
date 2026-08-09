@@ -37,11 +37,17 @@ in-process test goes through:
 ```text
 RequestIDMiddleware              <- outermost: nothing below it logs or
   SecurityHeadersMiddleware         answers without a correlation ID
-    BodySizeLimitMiddleware      <- its 413s must carry both
-      FastAPI (ServerErrorMiddleware, TrustedHostMiddleware, routers, ...)
+    RateLimitMiddleware          <- refuses before the body is counted
+      BodySizeLimitMiddleware    <- its 413s must carry both
+        FastAPI (ServerErrorMiddleware, TrustedHostMiddleware, routers, ...)
 ```
 
-All three wrappers are pure ASGI classes, _not_ `add_middleware`, because
+The rate limiter sits above the body guard so a flood is turned away before
+any of it is counted or read, and below the two stamping wrappers so its 429s
+are correlated and hardened like every other response - the property
+`tests/test_rate_limit.py` asserts against a live server.
+
+All four wrappers are pure ASGI classes, _not_ `add_middleware`, because
 Starlette places user middleware inside its outermost
 `ServerErrorMiddleware`: a 500 generated for an unhandled exception would
 skip `add_middleware`-registered middleware and leave without security
@@ -52,8 +58,9 @@ the finished app keeps even those 500s stamped and correlated.
 
 A frozen, slotted dataclass validated in `__post_init__`: an instance
 that exists is safe to build an app from. Invalid configuration
-(no trusted hosts after stripping blanks, non-positive body cap, unknown
-log level or log format, an unrecognized `WEBSITE_ENABLE_DOCS` value)
+(no trusted hosts after stripping blanks, non-positive body cap, negative
+rate limit, unknown log level or log format, an unrecognized
+`WEBSITE_ENABLE_DOCS` value)
 refuses to boot instead of producing a misbehaving server - e.g.
 `WEBSITE_TRUSTED_HOSTS=""` used to start an app that rejected every
 request with a 400, and `WEBSITE_ENABLE_DOCS=true` would silently mean
@@ -63,8 +70,9 @@ in from the environment, and `from_env` is where that is caught.
 
 `Settings.from_env()` accepts an explicit mapping so tests can exercise
 parsing without touching `os.environ`. Defaults are production-safe:
-docs off, localhost-only hosts, 1 MB body cap, human-readable logs (the
-image opts into JSON, see "Distribution image").
+docs off, localhost-only hosts, 1 MB body cap, 240 requests per minute per
+client, human-readable logs (the image opts into JSON, see "Distribution
+image").
 
 ## Security headers and CSP (`src/app/middleware.py`)
 
@@ -326,6 +334,79 @@ framework stack produce a framework-shaped 413 (same JSON shape as a
 422). Don't "simplify" the raise into a directly sent response - by the
 time the stream exceeds the cap, the endpoint is mid-request and only
 the framework knows whether a response has already started.
+
+## Rate limit (`src/app/middleware.py`, `Settings.rate_limit_per_minute`)
+
+**`UVICORN_LIMIT_CONCURRENCY` is not a rate limit.** It bounds simultaneous
+connections (see "Distribution image"), so one client on one keep-alive
+connection can issue unlimited sequential requests and never approach it.
+Backpressure and rate limiting answer different questions, and the image
+shipped only the first.
+
+This one lives in the app rather than at the proxy, which is the opposite of
+the choice made for HSTS and compression. The reason is the same one behind
+the body cap: **the distribution image must be safe as its own front door.**
+Compression is delegated because it is CPU-bound work that would stall
+uvicorn's event loop; a token bucket is a dictionary lookup and two floats.
+And the delegation has nowhere to go here - Caddy's `rate_limit` is a
+third-party module (`mholt/caddy-ratelimit`) that the pinned upstream image
+does not carry, and the reference deployment's Azure Container Apps ingress
+does not offer rate limiting at all. Documenting this as the ingress's job
+would document an assumption the project's own `publish.yml` violates.
+
+An ingress that _does_ limit should keep doing so: the two do not conflict,
+the tighter one wins, and `WEBSITE_RATE_LIMIT_PER_MINUTE=0` turns this one
+off for a deployment that would rather have exactly one.
+
+**A token bucket, not a fixed window.** Each client address gets
+`rate_limit_per_minute` tokens that refill continuously at that rate. A fixed
+window would let a client spend its whole allowance at the end of one window
+and again at the start of the next - twice the limit across the boundary -
+and the burst that the bucket allows is not a concession but the point: one
+page load spends a request per asset, so a limit set anywhere near a human's
+sustained request _rate_ would cut off ordinary browsing. The default, 240
+per minute, is four requests per second sustained per address; raise it
+rather than trimming it toward the traffic you actually expect.
+
+**The limit is per replica, like `--limit-concurrency`.** Two replicas admit
+twice the configured rate for one client. Making it otherwise means shared
+state - Redis, or the plugin's distributed mode - which is a dependency this
+blueprint does not have and a failure mode (the store is down: fail open, or
+fail the site?) it should not acquire by default. Size the number as a
+per-replica ceiling and let the ingress own a global one if a deployment
+needs it.
+
+**The identity is `scope["client"]`, so `--forwarded-allow-ips` decides
+whether it is right.** Uvicorn rewrites that value from `X-Forwarded-For`
+only for peers named there (see "URL generation"). Name no proxy and every
+forwarded request is attributed to the proxy's own address, i.e. one shared
+bucket for the entire internet - a misconfiguration that used to only
+mislabel log lines now throttles the whole site. Requests carrying no client
+address at all pass through: an address is the only identity available, and
+refusing what cannot be identified would apply a limit on nobody to
+everybody.
+
+**The client table is capped, because it is keyed on an attacker-chosen
+value.** An unbounded map from source address to bucket _is_ the memory
+exhaustion vector the limiter exists to prevent, so past
+`RATE_LIMIT_MAX_CLIENTS` the least recently seen entry is evicted. That is
+safe rather than a bypass, because a bucket that has refilled to capacity
+holds exactly what a first-time client would be handed anyway: the entries
+eviction reaches are the idle ones, while an address actually being limited
+keeps being seen and therefore stays tracked.
+
+**The probe paths are exempt**, the same list and the same reasoning as the
+Host allowlist (see "Trusted hosts"): an orchestrator polls on a fixed
+schedule from an address it may share with real traffic, and a 429 to a
+liveness probe is a healthy replica restarted for being busy. The comparison
+is exact and `root_path`-relative, so the exemption follows a prefixed
+deployment but a dotted path cannot normalize onto one and slip past.
+
+Refusals carry `Retry-After` (RFC 9110), rounded up so the moment it names is
+one a retry actually succeeds at. The IETF's `RateLimit-*` fields are
+deliberately not sent: they are still a draft, and advertising a remaining
+quota per response would leak the bucket state of an address to anyone
+sharing it.
 
 ## Request correlation (`src/app/observability.py`, `src/app/middleware.py`)
 

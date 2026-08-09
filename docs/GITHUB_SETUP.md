@@ -220,13 +220,47 @@ and the SARIF upload needs code scanning. Delete the workflow on a private fork.
 
 ## 9. Deploying releases to Azure Container Apps
 
-The `deploy` job in [publish.yml](../.github/workflows/publish.yml) rolls every
-full release out to Azure automatically: push `v1.2.3`, and once the image is
+[deploy-azure.yml](../.github/workflows/deploy-azure.yml) rolls every full
+release out to Azure automatically: push `v1.2.3`, and once the image is
 published, signed and verified, that exact digest becomes the running revision.
 Prereleases (`v1.2.3-rc.1`) publish an image and stop there, like `:latest`.
 
 It signs in with OIDC, so **there is no Azure secret in this repo** - the three
 `AZURE_*` values are identifiers, not credentials, and nothing needs rotating.
+
+### Where the release goes: `DEPLOY_TO`
+
+The rollout lives in its own file, but it has no trigger of its own -
+[publish.yml](../.github/workflows/publish.yml) calls it, and only after its
+`verify` job has proved the digest. That is what keeps the deploy tied to the
+artifact that was actually verified, instead of re-resolving a tag and racing
+the run that published it.
+
+Which provider gets called is decided by the `targets` job at the bottom of
+publish.yml, from a `DEPLOY_TO` **repository variable** (same place as the
+`AZURE_*` variables below). It is matched case-insensitively:
+
+| `DEPLOY_TO`                    | What happens                                                    |
+| ------------------------------ | --------------------------------------------------------------- |
+| `azure`                        | The release is deployed to Azure Container Apps.                |
+| `all`                          | The release is deployed to every provider - today, Azure.       |
+| `none`                         | The release is published but not deployed. The run is green.    |
+| anything else, including unset | The run **fails** after publishing, naming the accepted values. |
+
+Two deliberate choices there. Unset fails rather than defaulting, so a release
+never quietly goes nowhere - `none` is how you say that on purpose. And the
+check runs at the _end_ of the chain, so a misconfigured variable still leaves
+a published, signed, verified image in `ghcr.io`; only the rollout is lost.
+
+Scope `DEPLOY_TO` to the **repository**, not to the `production` environment:
+the `targets` job deliberately has no `environment:` (an environment there
+would make required reviewers gate the variable check), so an
+environment-scoped value would read as empty and fail.
+
+Adding a provider - say AWS - is three edits and no rewrite of what works: a
+`deploy-aws.yml` alongside this one, one more calling job in publish.yml, and
+`aws` appended to the `providers` list in the `targets` job, which is what the
+accepted values and the error message are both derived from.
 
 ### The environment is what makes the login work
 
@@ -293,23 +327,26 @@ it.
 ### Setting the target
 
 Which resources a release lands on is a property of the repository, not of the
-code, so the job reads two **variables** rather than hard-coded names. Add them
+code, so the job reads **variables** rather than hard-coded names. Add them
 under **Settings → Secrets and variables → Actions → Variables**:
 
 | Variable               | Example                        |
 | ---------------------- | ------------------------------ |
+| `DEPLOY_TO`            | `azure`                        |
 | `AZURE_RESOURCE_GROUP` | `fastapi-website-blueprint-rc` |
 | `AZURE_CONTAINER_APP`  | `fastapi-website-blueprint-ca` |
 
 They are variables, not secrets: resource names are not confidential, and
 `vars` stay readable in the run log - exactly what you want to see when a
-deploy lands somewhere unexpected. Scope them to the repository, or to the
-`production` environment if you later add a second environment with its own
-resources; `vars` resolves either.
+deploy lands somewhere unexpected. Scope the two `AZURE_*` ones to the
+repository, or to the `production` environment if you later add a second
+environment with its own resources; `vars` resolves either. `DEPLOY_TO` must
+be repository-scoped, for the reason given above.
 
-A missing variable interpolates to an empty string instead of failing, so the
-job's first step checks both and names the one that is unset. Retargeting a
-fork therefore needs no commit - only two settings.
+A missing variable or secret interpolates to an empty string instead of
+failing, so the deploy job's first step checks all five - the two variables
+above plus the three `AZURE_*` secrets - and names every one that is unset.
+Retargeting a fork therefore needs no commit, only settings.
 
 💰 Azure resources cost money regardless of repository visibility; the GitHub
 side is free. The container app pulls from `ghcr.io`, so the package must stay

@@ -3,7 +3,7 @@ Guards for deployment under a URL prefix.
 
 Against `prefixed_server` (uvicorn --root-path /prefix, see conftest.py):
 the browser resolves a page's links against the site's *public* URL, so a
-hand-written /css/theme.css would escape the prefix and miss the app
+hand-written /static/css/theme.css would escape the prefix and miss the app
 entirely. The templates generate every URL with url_for (which carries
 root_path) and js/shout.js reads the API endpoint from the form's rendered
 action attribute - these tests fetch the live pages and assert the prefix
@@ -22,8 +22,9 @@ import urllib.request
 import pytest
 
 from app.middleware import DOCS_COOP, DOCS_CSP
+from app.templating import STATIC_URL_PATH
 
-# Every static asset the pages reference, by prefix-relative path.
+# Every static asset the pages reference, by path under the static mount.
 ASSETS = (
     "favicon.svg",
     "css/theme.css",
@@ -53,7 +54,7 @@ def test_index_asset_urls_carry_prefix(prefixed_server: str) -> None:
     for asset in ASSETS:
         # Quoted, so this matches a whole attribute value: an unquoted
         # substring check would also pass on http://elsewhere/prefix/....
-        assert f'"/prefix/{asset}"' in html, (
+        assert f'"/prefix{STATIC_URL_PATH}/{asset}"' in html, (
             f"{asset} is not referenced under the /prefix root path"
         )
 

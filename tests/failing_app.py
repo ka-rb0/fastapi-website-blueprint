@@ -31,9 +31,9 @@ async def boom(request: Request) -> Response:
 
 
 # Inserted at the front, not appended, so this route wins whatever else the app
-# serves. That is load-bearing today: create_app mounts StaticFiles at "/",
-# which matches every path, so an appended route would be unreachable and this
-# test would assert against a 404 instead of the 500 it is about. It stays
-# correct if that mount ever narrows to /static - the front of the table is
-# simply where a test route belongs.
+# serves - the front of the table is where a test route belongs, and it stays
+# correct however the route table is arranged. It was outright load-bearing
+# while create_app mounted StaticFiles at "/": that mount matched every path,
+# so an appended route was unreachable and this test asserted against a 404
+# instead of the 500 it is about.
 framework_app(app).router.routes.insert(0, Route(BOOM_PATH, boom))

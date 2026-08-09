@@ -11,8 +11,9 @@ import pytest
 
 from app.config import Settings
 from app.middleware import DOCS_COOP, DOCS_CSP, SECURITY_HEADERS
-from app.routers.probes import LIVENESS_PATH
+from app.routers.probes import LIVENESS_PATH, PROBE_PATHS
 from app.schemas import MAX_SHOUT_LENGTH
+from app.templating import STATIC_URL_PATH
 
 
 @pytest.fixture(scope="module")
@@ -149,10 +150,55 @@ def test_oversized_chunked_body_rejected(server: str, max_body_bytes: int) -> No
     }
 
 
-def test_unknown_path_serves_404_page(server: str) -> None:
-    """Unknown non-API paths get the branded 404 page - with a real 404 status."""
+def _get_without_following_redirects(server: str, path: str) -> tuple[int, str | None]:
+    """
+    GET `path` and return its status and Location, without being redirected.
+
+    Raw http.client rather than urllib, which follows a 307 transparently and
+    would report the redirect's destination as a plain 200 - hiding the very
+    response the trailing-slash tests below are about.
+    """
+    connection = http.client.HTTPConnection(server.removeprefix("http://"), timeout=5)
+    try:
+        connection.request("GET", path)
+        response = connection.getresponse()
+        response.read()
+        return response.status, response.headers["Location"]
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize("path", ["/docs", "/openapi.json", "/api/shout", *PROBE_PATHS])
+def test_trailing_slash_redirects_to_the_canonical_path(server: str, path: str) -> None:
+    """
+    Every route answers its trailing-slash form by pointing at itself.
+
+    Starlette's router does this unprompted, but only for a request that
+    matched no route at all - and a StaticFiles mount matches every path
+    beneath it with Match.FULL. While the assets were mounted at "/" the
+    redirect was therefore unreachable and /healthz/, /docs/ and the rest all
+    answered 404, with "/" the lone survivor because the index route matched
+    it before the mount was ever reached (see app.factory).
+
+    Parametrized across pages, docs, schema, API and probes because the
+    regression is a property of the route table, invisible from any one route.
+    """
+    status, location = _get_without_following_redirects(server, f"{path}/")
+    assert status == 307
+    assert location == f"{server}{path}"
+
+
+@pytest.mark.parametrize("path", ["/no-such-page", "/no-such-page/"])
+def test_unknown_path_serves_404_page(server: str, path: str) -> None:
+    """
+    Unknown non-API paths get the branded 404 page - with a real 404 status.
+
+    Both slash forms, because the redirect above fires only when stripping the
+    slash names a route that exists: a miss has to stay a miss rather than
+    bounce the client to a second 404.
+    """
     with pytest.raises(urllib.error.HTTPError) as excinfo:
-        urllib.request.urlopen(f"{server}/no-such-page", timeout=5)
+        urllib.request.urlopen(f"{server}{path}", timeout=5)
     assert excinfo.value.code == 404
     assert excinfo.value.headers["Content-Type"].startswith("text/html")
     html = excinfo.value.read().decode()
@@ -225,17 +271,25 @@ def test_docs_gets_relaxed_browser_policies(server: str, path: str) -> None:
 
 def test_docs_csp_not_leaked_via_dot_segments(server: str) -> None:
     """
-    A raw /docs/../ path must carry the strict CSP, not DOCS_CSP.
+    A path that only *looks* like it is under /docs carries the strict CSP.
 
     Browsers resolve dot segments before sending, but raw clients (urllib
-    included) send them literally - and StaticFiles serves the *normalized*
-    path, so /docs/../css/theme.css is a real stylesheet. The middleware must
-    match the docs prefix against the normalized path too, or this response
-    would get the relaxed policy.
+    included) send them literally, so this URL reaches the app with its /docs
+    prefix intact while resolving out of the docs subtree entirely. The
+    middleware matches the prefix against the normalized path, so the
+    relaxation follows where a request resolves rather than how a client chose
+    to spell it.
+
+    The response is a 404 (the router matches raw paths, so nothing spelled
+    with `..` reaches a route or the static mount) - which is the point: a 404
+    genuinely under /docs/ does carry the relaxed policy, and this one must
+    not, because it is not under /docs at all.
     """
-    with urllib.request.urlopen(f"{server}/docs/../css/theme.css", timeout=5) as resp:
-        assert resp.status == 200
-        assert "light-dark" in resp.read().decode()
+    url = f"{server}/docs/..{STATIC_URL_PATH}/css/theme.css"
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        urllib.request.urlopen(url, timeout=5)
+    with excinfo.value as resp:
+        assert resp.code == 404
         csp = resp.headers["Content-Security-Policy"]
         assert csp == SECURITY_HEADERS["Content-Security-Policy"]
         assert (

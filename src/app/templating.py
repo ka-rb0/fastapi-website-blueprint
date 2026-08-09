@@ -10,6 +10,7 @@ from .schemas import MAX_SHOUT_LENGTH, MIN_SHOUT_LENGTH
 PACKAGE_DIR = Path(__file__).parent
 STATIC_DIR = PACKAGE_DIR / "static"
 TEMPLATES_DIR = PACKAGE_DIR / "templates"
+STATIC_URL_PATH = "/static"
 
 
 def theme_css_pair(token: str) -> dict[str, str]:

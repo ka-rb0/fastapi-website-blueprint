@@ -135,10 +135,12 @@ nothing and the docs only exist in development. This is the pattern to
 copy when a page of yours needs its own CSP exception.
 
 The path is normalized (`posixpath.normpath`) after `root_path` removal
-before the prefix check: browsers resolve dot segments before sending,
-but raw clients need not, and `StaticFiles` serves the _normalized_
-path - a raw `/docs/../css/theme.css` is a real asset and must get the
-strict CSP, not the docs relaxation.
+before the prefix check, so the relaxation follows where a request
+resolves rather than how a client spelled it: browsers resolve dot
+segments before sending, but raw clients need not, so a literal
+`/docs/../static/css/theme.css` arrives with its `/docs` prefix intact
+while pointing outside the subtree, and would otherwise carry the docs
+policies out of it.
 
 The docs subtree also changes `Cross-Origin-Opener-Policy` from the
 site-wide `same-origin` to `same-origin-allow-popups`. Swagger UI's OAuth
@@ -709,10 +711,27 @@ one docs UI is enough, and each one is its own set of CSP exceptions.
 
 ## Static files (`src/app/factory.py`)
 
-Mounted at `/` **last**, so real routes always take precedence, and
-**without** `html=True`: its `index.html`/`404.html` special-casing
-belonged to an all-static frontend, and misses must instead raise 404s
-for the branded handler above.
+Mounted **last**, so real routes always take precedence, and under
+`STATIC_URL_PATH` (`/static`, `src/app/templating.py`) rather than at
+`/`, which would make the mount a catch-all. That prefix is load-bearing,
+not cosmetic: a `Mount` matches every path beneath it with `Match.FULL`,
+and Starlette only reaches its trailing-slash redirect once _no_ route has
+matched. Mounted at `/`, the assets therefore swallowed the whole URL
+space and silently disabled that redirect site-wide - `/healthz/` and
+`/docs/` answered 404 rather than pointing at the canonical path, with
+`/` the single exception, because the index route matched it before the
+mount was reached. `tests/test_api.py` pins the redirect across pages,
+docs, schema, API and probes, since the bug is a property of the route
+table and invisible from any one route.
+
+Nothing hard-codes the prefix: templates reach assets through
+`url_for('static', path=...)`, which derives the URL from the mount and
+adds any `root_path` (see "URL generation" above), so moving the mount
+moves every reference with it.
+
+Mounted **without** `html=True`: its `index.html`/`404.html`
+special-casing belonged to an all-static frontend, and misses must
+instead raise 404s for the branded handler above.
 
 ## Schemas (`src/app/schemas.py`)
 

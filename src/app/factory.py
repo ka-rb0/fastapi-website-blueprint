@@ -14,7 +14,7 @@ from .middleware import (
 )
 from .routers import PROBE_PATHS, api_router, create_pages_router, probes_router
 from .telemetry import instrument_app
-from .templating import STATIC_DIR, create_templates
+from .templating import STATIC_DIR, STATIC_URL_PATH, create_templates
 
 APP_TITLE = "FastAPI Website Blueprint"
 
@@ -56,11 +56,19 @@ def create_app(settings: Settings) -> RequestIDMiddleware:
     fastapi_app.include_router(probes_router)
     register_exception_handlers(fastapi_app, templates)
 
-    # Mount assets last so application routes always take precedence. No
-    # html=True: its index.html/404.html special-casing belonged to an
+    # Mounted last so application routes always take precedence, and under a
+    # prefix of its own rather than at "/", which would make it a catch-all:
+    # a Mount matches every path beneath it with Match.FULL, and Starlette
+    # only reaches its trailing-slash redirect once *no* route has matched. A
+    # root mount therefore silently disables that redirect for the whole site
+    # - /healthz/ and /docs/ answer 404 instead of pointing at the canonical
+    # path - with "/" the single exception, because the index route above
+    # matches it first. See "Static files" in docs/ARCHITECTURE.md.
+    #
+    # No html=True: its index.html/404.html special-casing belonged to an
     # all-static frontend - misses must raise 404s that the branded handler
     # (see app.exceptions) turns into the branded page.
-    fastapi_app.mount("/", StaticFiles(directory=STATIC_DIR), name="static")
+    fastapi_app.mount(STATIC_URL_PATH, StaticFiles(directory=STATIC_DIR), name="static")
 
     # Inside the framework rather than beside the wrappers below, because a
     # server span is only worth its cost with the matched route on it and

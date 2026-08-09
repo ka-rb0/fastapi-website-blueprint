@@ -225,9 +225,8 @@ def test_an_unhandled_exception_leaves_a_failed_span(
     async def boom(request: Request) -> Response:
         raise RuntimeError("kaboom")
 
-    # Inserted at the front for the reason tests/failing_app.py gives: the
-    # StaticFiles mount at "/" matches every path, so an appended route would
-    # answer 404 and this test would assert nothing.
+    # Inserted at the front for the reason tests/failing_app.py gives: where a
+    # test route belongs, and independent of how the route table is arranged.
     framework_app(traced_app).router.routes.insert(0, Route("/boom", boom))
 
     with pytest.raises(RuntimeError):

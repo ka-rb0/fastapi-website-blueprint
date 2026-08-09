@@ -101,6 +101,15 @@ image; no second command is needed.
   it. JSON log lines gain `trace_id`/`span_id` while a request is being traced,
   which is how a backend joins a log line to its trace - see "Telemetry" in
   [ARCHITECTURE.md](ARCHITECTURE.md).
+- The dev container ships an OpenTelemetry Collector, and the `proxy-backend`
+  service already exports to it: browse
+  `https://proxy.localhost:$WEBSITE_PROXY_HTTPS_PORT$UVICORN_ROOT_PATH/` and
+  watch the spans and metrics arrive with
+  `docker compose logs -f otel-collector`. It prints them (
+  `.devcontainer/otel-collector.yaml`, `exporters.debug`); point that file at a
+  real backend and nothing in the app changes. The direct dev server is off by
+  default because the test suite inherits its environment - uncomment the two
+  `OTEL_*` lines in `.devcontainer/.env` to include it.
 - Importing `app.main` claims process-wide logging, so **the root and Uvicorn
   portions of `uvicorn --log-config` are silently overridden** when you serve
   `app.main:app`; explicitly named non-Uvicorn loggers may retain their

@@ -11,14 +11,19 @@ service in the fleet, and the instrumentation still defaults to the pre-stable
 spelling for anyone who does not opt in (see app.telemetry). And that the
 chain actually reaches a collector: the in-process tests below read spans out
 of an in-memory exporter, which proves the instrumentation but not the
-transport, so the last test runs a real server against a real OTLP endpoint,
-parses what arrived, and checks the server's own access line names that same
-trace - the join an operator walks from a log search to a request's trace.
+transport, so one test runs a real server against a real OTLP endpoint, parses
+what arrived, and checks the server's own access line names that same trace -
+the join an operator walks from a log search to a request's trace.
+
+A last group covers the development topology, where the two ends of the same
+contract are written in two files in two syntaxes and only a test can hold
+them together.
 """
 
 import json
 import logging
 import os
+import re
 import time
 import urllib.request
 from collections.abc import Generator
@@ -27,6 +32,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 from typing import NamedTuple
+from urllib.parse import urlsplit
 
 import pytest
 from opentelemetry import metrics, trace
@@ -65,7 +71,13 @@ from app.telemetry import (
 )
 
 from .conftest import next_test_port, run_server
-from .helpers import drive_get, framework_app
+from .helpers import (
+    compose_default,
+    compose_services,
+    devcontainer_yaml,
+    drive_get,
+    framework_app,
+)
 
 HOST = "site.example"
 
@@ -560,3 +572,121 @@ def test_a_running_server_exports_to_a_real_collector(tmp_path: Path) -> None:
     assert traced_line["trace_id"] == spans[0].trace_id.hex()
     assert probe_lines, "the readiness poll left no access line to check"
     assert all("trace_id" not in record for record in probe_lines)
+
+
+# --- The development topology -------------------------------------------
+#
+# The application half above says nothing about where telemetry goes in
+# development. That is Compose's job, and the two ends of it - the URL the app
+# dials and the address the collector binds - are written in different files in
+# different syntaxes, so nothing but a test can keep them from drifting apart.
+
+COLLECTOR_SERVICE = "otel-collector"
+COLLECTOR_CONFIG = "otel-collector.yaml"
+# Where the contrib image's own CMD already looks for its configuration, which
+# is why the Compose service mounts onto this path and overrides no command.
+IMAGE_CONFIG_PATH = "/etc/otelcol-contrib/config.yaml"
+
+
+def _collector_receiver_address() -> tuple[str, int]:
+    """Return the host and port the development collector's OTLP receiver binds."""
+    protocols = devcontainer_yaml(COLLECTOR_CONFIG)["receivers"]["otlp"]["protocols"]
+    assert set(protocols) == {"http"}, (
+        "the collector listens for a protocol the application cannot speak"
+        " - only the HTTP/protobuf exporter is installed (see app.telemetry)"
+    )
+    host, _, port = str(protocols["http"]["endpoint"]).rpartition(":")
+    return host, int(port)
+
+
+def test_the_development_collector_image_is_versioned_and_digest_pinned() -> None:
+    """The added development dependency follows the repository's image policy."""
+    image = compose_services()[COLLECTOR_SERVICE]["image"]
+
+    assert re.fullmatch(
+        r"otel/opentelemetry-collector-contrib:\d+\.\d+\.\d+@sha256:[0-9a-f]{64}",
+        image,
+    )
+
+
+def test_the_collector_accepts_both_signals_on_a_reachable_address() -> None:
+    """
+    It binds an address other containers can reach, and drops neither signal.
+
+    The collector's default is `localhost`, which inside a container refuses
+    every sender on the Compose network - the failure would look exactly like
+    instrumentation that never produced anything. A pipeline missing `metrics`
+    would look the same way for half the telemetry.
+    """
+    host, _ = _collector_receiver_address()
+    pipelines = devcontainer_yaml(COLLECTOR_CONFIG)["service"]["pipelines"]
+
+    assert host == "0.0.0.0", "a loopback bind is unreachable from other services"
+    assert pipelines.keys() >= {"traces", "metrics"}
+    assert all("otlp" in pipeline["receivers"] for pipeline in pipelines.values())
+
+
+def test_the_proxy_backend_exports_to_the_bundled_collector() -> None:
+    """
+    Its default endpoint is the collector service, on the port that collector binds.
+
+    This is the pairing nothing else can hold together: the URL lives in
+    Compose, the listen address lives in the collector's own config, and a port
+    changed on one side would silently turn every export into a connection
+    refused that only the collector's absent output would reveal.
+    """
+    services = compose_services()
+    environment = services["proxy-backend"]["environment"]
+    endpoint = urlsplit(compose_default(environment["OTEL_EXPORTER_OTLP_ENDPOINT"]))
+    _, receiver_port = _collector_receiver_address()
+
+    assert endpoint.hostname == COLLECTOR_SERVICE
+    assert endpoint.hostname in services, "the endpoint names no Compose service"
+    assert endpoint.port == receiver_port
+    # An endpoint without a service name is a boot failure, not a warning, so
+    # the default that makes this service export must come with one.
+    assert compose_default(environment["OTEL_SERVICE_NAME"])
+
+
+def test_the_collector_is_configured_by_the_file_its_image_already_reads() -> None:
+    """No command override: the mount lands on the image's own default path."""
+    collector = compose_services()[COLLECTOR_SERVICE]
+
+    assert "command" not in collector
+    assert any(
+        volume.endswith(f":{IMAGE_CONFIG_PATH}:ro") for volume in collector["volumes"]
+    )
+
+
+def test_the_collector_is_independent_development_infrastructure() -> None:
+    """
+    Nothing depends on it, and it publishes nothing.
+
+    Same standing as the Caddy sidecar: removing this service must leave the
+    application serving, because telemetry is a diagnostic and never a request
+    path. Publishing the OTLP port would additionally accept telemetry from
+    anything on the machine, for a receiver whose only senders are containers
+    on the Compose network.
+    """
+    services = compose_services()
+
+    assert "depends_on" not in services[COLLECTOR_SERVICE]
+    assert not any(
+        COLLECTOR_SERVICE in service.get("depends_on", ())
+        for service in services.values()
+    )
+    assert "ports" not in services[COLLECTOR_SERVICE]
+
+
+def test_the_development_container_exports_nothing_by_default() -> None:
+    """
+    The container that runs the test suite stays off unless a developer says so.
+
+    Its environment is what every live-server test inherits (tests/conftest.py),
+    so defaulting it to the collector would make the suite's behavior depend on
+    whether a sidecar happened to be up.
+    """
+    environment = compose_services()["master"]["environment"]
+
+    assert compose_default(environment["OTEL_EXPORTER_OTLP_ENDPOINT"]) == ""
+    assert compose_default(environment["OTEL_SERVICE_NAME"]) == ""

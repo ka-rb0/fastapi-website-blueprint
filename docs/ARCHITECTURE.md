@@ -655,10 +655,38 @@ Starlette's `BackgroundTask` globally, upstream's doing, so a second
 app in the same process with telemetry off still has traced background
 tasks.
 
-`tests/test_telemetry.py` covers this in two halves: in-memory providers
-for what the instrumentation records, and a real uvicorn exporting over
-OTLP to a stub collector the test parses, because an in-memory exporter
-proves the instrumentation and nothing about the transport.
+### The development collector
+
+Compose runs an OpenTelemetry Collector beside Caddy, and `proxy-backend`
+exports to it by default - the one service that does, so the feature is
+reachable without editing anything. It is the same argument the Caddy
+sidecar makes for compression: the thing a deployment relies on should be
+visible in development rather than described. The app talks OTLP to a
+collector it can reach, and the collector decides where telemetry goes;
+in development that is a `debug` exporter printing to
+`docker compose logs -f otel-collector`, and pointing it at a real
+backend is an edit to `.devcontainer/otel-collector.yaml` alone. The
+image is the `contrib` distribution precisely so that edit never becomes
+an image change.
+
+`master` deliberately stays off: it is the container that runs the test
+suite, whose servers inherit its environment, and a suite whose behavior
+depends on whether a sidecar is up fails for the wrong reasons. Setting
+the two `OTEL_*` variables in `.devcontainer/.env` includes it - and
+sends `proxy-backend` elsewhere too, since the same variable overrides
+its default.
+
+The endpoint the app dials lives in Compose and the address the collector
+binds lives in the collector's own config: two files, two syntaxes, one
+fact. `tests/test_telemetry.py` pins them against each other, the way
+`tests/test_node_version_consistency.py` pins the two places a Node
+version appears.
+
+`tests/test_telemetry.py` covers the application half in two halves of
+its own: in-memory providers for what the instrumentation records, and a
+real uvicorn exporting over OTLP to a stub collector the test parses,
+because an in-memory exporter proves the instrumentation and nothing
+about the transport.
 
 ## Branded 404 (`src/app/exceptions.py`)
 

@@ -6,8 +6,9 @@ import re
 import urllib.parse
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
+import yaml
 from fastapi import FastAPI
 from starlette.types import ASGIApp, Message, Scope
 
@@ -17,7 +18,49 @@ from app.middleware import (
     SecurityHeadersMiddleware,
 )
 
-DOCKERFILE = Path(__file__).parent.parent / ".devcontainer" / "Dockerfile"
+DEVCONTAINER_DIR = Path(__file__).parent.parent / ".devcontainer"
+DOCKERFILE = DEVCONTAINER_DIR / "Dockerfile"
+
+# A `${NAME:-fallback}` Compose interpolation, which PyYAML hands back
+# verbatim: Compose resolves these, a structural parse cannot.
+COMPOSE_INTERPOLATION = re.compile(r"\$\{(?P<name>\w+):-(?P<default>.*)\}")
+
+
+def devcontainer_yaml(name: str) -> dict[str, Any]:
+    """
+    Parse one of the dev container's YAML files structurally.
+
+    PyYAML is a declared dependency (see pyproject.toml) specifically so tests
+    can assert on service names, keys and image strings instead of raw text,
+    which stays correct across reordering or reformatting that raw text
+    wouldn't survive.
+    """
+    parsed: dict[str, Any] = yaml.safe_load((DEVCONTAINER_DIR / name).read_text())
+    return parsed
+
+
+def compose_config() -> dict[str, Any]:
+    """Return the parsed `docker-compose.yml`."""
+    return devcontainer_yaml("docker-compose.yml")
+
+
+def compose_services() -> dict[str, Any]:
+    """Return `docker-compose.yml`'s `services` mapping."""
+    services: dict[str, Any] = compose_config()["services"]
+    return services
+
+
+def compose_default(value: str) -> str:
+    """
+    Return the fallback of a `${NAME:-fallback}` Compose interpolation.
+
+    Asserting rather than tolerating a plain literal: a default read out of a
+    value that has no interpolation around it would silently also be asserting
+    that the setting cannot be overridden from `.env`.
+    """
+    match = COMPOSE_INTERPOLATION.fullmatch(value)
+    assert match, f"{value!r} is not a Compose interpolation with a default"
+    return match["default"]
 
 
 class DrivenResponse(NamedTuple):

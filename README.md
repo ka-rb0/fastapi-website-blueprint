@@ -31,6 +31,10 @@ dark themes.
   me_) and `/healthz` as the legacy alias. Both decisions get their own
   route, so the dependency check you add later lands on the one wired to
   de-routing rather than the one wired to a restart.
+- Build identity at `/version`: the release tag and commit the image was
+  built from, baked in by the publish workflow and reported on every span
+  and metric as `service.version`. Answers "what is actually deployed right
+  now" without registry access or a shell on the box.
 - API tests plus Playwright E2E tests against a live uvicorn server.
 - A development-only Caddy sidecar for exercising local HTTPS, forwarded
   headers, and a stripped URL prefix against a second reload-enabled Uvicorn

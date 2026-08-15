@@ -44,7 +44,7 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
 )
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
-from opentelemetry.sdk.resources import SERVICE_NAME
+from opentelemetry.sdk.resources import SERVICE_NAME, SERVICE_VERSION
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -66,6 +66,7 @@ from app.telemetry import (
     OTLP_PROTOCOL_VARIABLES,
     REQUEST_ID_ATTRIBUTE,
     UNNAMED_SERVICE,
+    VCS_REVISION_ATTRIBUTE,
     configure_telemetry,
     create_providers,
 )
@@ -382,7 +383,7 @@ def test_both_signals_describe_one_named_service(
     """
     monkeypatch.setenv("OTEL_SERVICE_NAME", SERVICE)
 
-    tracer_provider, meter_provider = create_providers()
+    tracer_provider, meter_provider = create_providers(Settings())
     try:
         resource = tracer_provider.resource
         assert resource.attributes[SERVICE_NAME] == SERVICE
@@ -390,6 +391,78 @@ def test_both_signals_describe_one_named_service(
     finally:
         tracer_provider.shutdown()
         meter_provider.shutdown()
+
+
+def test_the_resource_carries_the_build_that_is_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Every span and metric says which build produced it, under standard names.
+
+    This is the fact a backend cannot recover any other way: a latency shift or
+    a new error signature is only actionable once it can be attributed to a
+    release, and the deployment does not know which one it is running - the
+    image does. The commit rides along because the version alone cannot tell
+    two builds of the rolling default-branch image apart, both of which report
+    their version as the branch name.
+    """
+    monkeypatch.setenv("OTEL_SERVICE_NAME", SERVICE)
+    settings = Settings(version="1.2.3", commit="a" * 40)
+
+    tracer_provider, meter_provider = create_providers(settings)
+    try:
+        attributes = tracer_provider.resource.attributes
+        assert attributes[SERVICE_VERSION] == "1.2.3"
+        assert attributes[VCS_REVISION_ATTRIBUTE] == "a" * 40
+    finally:
+        tracer_provider.shutdown()
+        meter_provider.shutdown()
+
+
+def test_the_build_outranks_a_version_claimed_by_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    A deployment cannot relabel which release is running, but keeps its own attributes.
+
+    Both halves matter and they pull in opposite directions. The image is the
+    only party that knows what it is, so `service.version` from
+    OTEL_RESOURCE_ATTRIBUTES has to lose - otherwise a stale value in a Helm
+    chart silently attributes one release's telemetry to another. Everything
+    *else* in that variable is the deployment's to set and must survive, which
+    a resource built by replacing the environment rather than merging with it
+    would quietly drop.
+    """
+    monkeypatch.setenv("OTEL_SERVICE_NAME", SERVICE)
+    monkeypatch.setenv(
+        "OTEL_RESOURCE_ATTRIBUTES",
+        "service.version=claimed-by-the-deployment,deployment.environment.name=prod",
+    )
+
+    tracer_provider, meter_provider = create_providers(Settings(version="1.2.3"))
+    try:
+        attributes = tracer_provider.resource.attributes
+        assert attributes[SERVICE_VERSION] == "1.2.3"
+        assert attributes["deployment.environment.name"] == "prod"
+    finally:
+        tracer_provider.shutdown()
+        meter_provider.shutdown()
+
+
+def test_the_revision_attribute_is_the_name_opentelemetry_specifies() -> None:
+    """
+    The wire name matches the specification, without importing a private module.
+
+    app.telemetry writes `vcs.ref.head.revision` out as a literal because the
+    Python package only exposes it from `opentelemetry.semconv._incubating`,
+    whose underscore says the import path may move. That trade is only sound
+    while the literal is right, so this test does the import the application
+    declines to do - here a rename breaks one assertion instead of the app's
+    boot.
+    """
+    from opentelemetry.semconv._incubating.attributes import vcs_attributes
+
+    assert VCS_REVISION_ATTRIBUTE == vcs_attributes.VCS_REF_HEAD_REVISION
 
 
 def test_an_unnamed_service_refuses_to_boot(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -404,7 +477,7 @@ def test_an_unnamed_service_refuses_to_boot(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.delenv("OTEL_RESOURCE_ATTRIBUTES", raising=False)
 
     with pytest.raises(ValueError, match=rf"OTEL_SERVICE_NAME.*{UNNAMED_SERVICE}"):
-        create_providers()
+        create_providers(Settings())
 
 
 @pytest.mark.parametrize("variable", OTLP_PROTOCOL_VARIABLES)
@@ -422,7 +495,7 @@ def test_an_unsupported_otlp_protocol_refuses_to_boot(
     monkeypatch.setenv(variable, "grpc")
 
     with pytest.raises(ValueError, match=rf"{variable}.*'grpc'"):
-        create_providers()
+        create_providers(Settings())
 
 
 def test_configuring_telemetry_while_it_is_off_installs_nothing(

@@ -234,16 +234,21 @@ still carries the security headers, because `SecurityHeadersMiddleware`
 sits outside the framework.
 
 `HostValidationMiddleware` (`src/app/middleware.py`) is what applies that
-check, and it exempts exactly the probe routes below (`PROBE_PATHS`). A
-Kubernetes `httpGet` probe addresses the pod by the IP it was scheduled
-with and sends it as `Host`, so no allowlist can contain it - a guarded
-probe route means every pod fails its own liveness check and restarts
-forever, on a deployment that is otherwise configured correctly. Those
-routes can be exempt because the invariant above does not reach them:
-they render no template and reflect nothing of the request, they answer a
-constant `{"status": "ok"}`. That property is the price of admission to
-`PROBE_PATHS` - `tests/test_trusted_hosts.py` parametrizes over the whole
-tuple so a route added without it fails there. Nothing else is exempt,
+check, and it exempts the probe routes below (`PROBE_PATHS`) plus
+`/version`. A Kubernetes `httpGet` probe addresses the pod by the IP it
+was scheduled with and sends it as `Host`, so no allowlist can contain
+it - a guarded probe route means every pod fails its own liveness check
+and restarts forever, on a deployment that is otherwise configured
+correctly. `/version` is addressed the same way by a rollout check, for
+the same reason (see "Build identity" below). Those routes can be exempt
+because the invariant above does not reach them: they render no template
+and reflect nothing of the request back. That property is the price of
+admission - `tests/test_trusted_hosts.py` parametrizes over the whole
+`PROBE_PATHS` tuple so a route added without it fails there, and covers
+`/version` beside it. The list is spelled out at the call site in
+`src/app/factory.py` rather than being `PROBE_PATHS` alone, because the
+two lists genuinely differ: telemetry excludes the probes and keeps
+`/version`. Nothing else is exempt,
 and the comparison is deliberately exact (after `root_path` is removed,
 never normalized) - normalizing would _widen_ an exemption, the opposite
 of the CSP check, where it narrows a relaxation. `/livez/` is the case
@@ -313,6 +318,67 @@ The alternative was to make every deployment configure
 in `WEBSITE_TRUSTED_HOSTS` - a template should not hand its users a
 rediscovery exercise, and the second answer weakens the allowlist that is
 the point of this section.
+
+## Build identity (`GET /version`, `Settings.version`, `Settings.commit`)
+
+`GET /version` answers with the release and commit the running image was
+built from:
+
+```json
+{ "version": "1.2.3", "commit": "0b48557..." }
+```
+
+**It is not a fourth probe, and the name reflects that.** The three names
+above are Kubernetes' own probe endpoints copied verbatim, and their `z`
+is the zpages convention for handlers reporting live process state. A
+build identity is not state - it is fixed for the life of the process -
+and the same Kubernetes API server publishes it, as the Docker Engine API
+and etcd do, at a plain `/version`. Following the source of the other
+three names is what produces this one; `/versionz` would look consistent
+and be the opposite. It also stays out of `PROBE_PATHS`, because
+membership in that tuple decides two unrelated things at once (the `Host`
+exemption and what telemetry never records) and this route wants only the
+first.
+
+**Neither value can come from the source tree.** The release version
+lives in GitHub - `pyproject.toml` carries a `0.0.0` placeholder, since
+this is not a distributable package - and a built image has no `.git` to
+read a commit out of. So both are baked in at build time: the ARGs at the
+end of `.devcontainer/Dockerfile` become `WEBSITE_VERSION` and
+`WEBSITE_COMMIT` in the image's environment,
+`.github/workflows/publish.yml` passes them with `--build-arg`, and
+`Settings.from_env` reads them back. The ARGs are last in the stage on
+purpose: everything after a layer that consumes a build argument is
+rebuilt with it, and below that point there is only metadata, so a new
+release re-runs no install, no `useradd` and no `COPY`.
+
+The version comes from `docker/metadata-action`'s output rather than
+`github.ref_name`, so it is the same string the primary image tag is
+built from - what a deployment reports always matches the tag it was
+pulled as, with no `v` to reconcile. **The commit is what makes non-tag
+builds identifiable**: that output degrades to `main` on a default-branch
+push, so without it every rolling `:main` image is indistinguishable from
+every other, in the API and in the telemetry alike. A build with no
+`--build-arg` at all - a local `docker build`, a source checkout - reports
+`0.0.0` / `unknown`, which is a version no release will ever carry.
+`tests/test_build_identity.py` holds the four files to the same strings,
+because a rename anywhere in that chain breaks nothing visibly: the app
+keeps booting and keeps answering, with a placeholder version forever.
+
+**It is exempt from the `Host` allowlist and left in telemetry** - the
+inverse of the probes on the second point. The exemption is there because
+the question is asked _of an instance_, by a rollout check addressing a
+container or pod directly. The cost is that the release string is
+readable by anyone who can reach the instance, which is a deliberate
+distinction from the suppressed `Server` header (see "No `Server` header"
+below): that header hands out the stack and with it a list of published
+vulnerabilities to try, where this hands out a release number of this
+application's own that implies nothing about what it is built on. A
+deployment that disagrees drops `VERSION_PATH` from the exempt list in
+`src/app/factory.py`, leaving the route reachable only through the
+ingress. It stays traced because it is asked occasionally rather than
+several times a minute, and a span proving a rollout was verified is
+worth having.
 
 ## Request body cap (`src/app/middleware.py`, `Settings.max_body_bytes`)
 
@@ -608,6 +674,25 @@ request rejected by the body cap _before_ routing is logged with its ID
 and never traced, the only response of this app's that telemetry does not
 see.
 
+**Every signal carries the build that produced it.** `create_providers`
+passes two attributes into the shared `Resource`: `service.version` (the
+release) and `vcs.ref.head.revision` (the commit). This is the one thing
+in that function not left to the standard environment, and for the reason
+the rest of it is: the endpoint, sampler and timeouts are the
+deployment's to state, but _which build is running_ is fixed when the
+image is built and the deployment does not know it. That makes the
+precedence deliberate - attributes passed here are merged last, so a
+`service.version` in `OTEL_RESOURCE_ATTRIBUTES` loses (a stale value in a
+chart would otherwise attribute one release's telemetry to another) while
+every other attribute that variable sets survives untouched. The commit
+rides along for the same reason it appears in `GET /version`: on a
+rolling `:main` image the version is the branch name, so without it two
+builds are one series in every backend. It is spelled out as a literal
+rather than imported, because the Python package exposes that name only
+from `opentelemetry.semconv._incubating` - `tests/test_telemetry.py` does
+the import the application declines to do, so a rename there breaks one
+assertion instead of the app's boot.
+
 **Probe traffic is excluded.** Every layer in front of a deployment polls
 `/livez`, `/readyz` and `/healthz` several times a minute forever; traced,
 they would outnumber real requests in the trace store and pull the
@@ -830,6 +915,13 @@ environment rather than as the code default is what keeps a derived
 project from editing a template-owned file to get it (see "Request
 correlation" above); `docker run -e LOG_FORMAT=text` reads `docker logs`
 by hand.
+
+`WEBSITE_VERSION` and `WEBSITE_COMMIT` sit at the very end of the stage,
+and unlike everything above them they are not defaults a deployment is
+expected to override: they are `ARG`s the publish workflow fills in, and
+the only values here the source tree cannot state (see "Build identity"
+above). Build arguments are readable in an image's history, which is fine
+for these two facts and is the reason nothing else is passed that way.
 
 `tests/test_reverse_proxy_config.py` covers both halves of this, the dev
 topology and the image's, and the image's behaviorally: there is no Docker in

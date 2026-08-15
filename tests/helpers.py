@@ -25,6 +25,9 @@ DOCKERFILE = DEVCONTAINER_DIR / "Dockerfile"
 # verbatim: Compose resolves these, a structural parse cannot.
 COMPOSE_INTERPOLATION = re.compile(r"\$\{(?P<name>\w+):-(?P<default>.*)\}")
 
+# A `${NAME}` reference to a build argument inside a Dockerfile ENV value.
+BUILD_ARG_REFERENCE = re.compile(r"\$\{(?P<name>\w+)\}")
+
 
 def devcontainer_yaml(name: str) -> dict[str, Any]:
     """
@@ -148,6 +151,16 @@ def distribution_entrypoint() -> list[str]:
     return argv
 
 
+def distribution_args() -> dict[str, str]:
+    """Return the build arguments the distribution stage declares, with defaults."""
+    return {
+        match["name"]: match["value"].strip('"')
+        for match in re.finditer(
+            r"^ARG (?P<name>\w+)=(?P<value>.*)$", _distribution_stage(), re.MULTILINE
+        )
+    }
+
+
 def distribution_environment() -> dict[str, str]:
     """
     Return the run-time defaults the distribution stage declares with ENV.
@@ -156,17 +169,32 @@ def distribution_environment() -> dict[str, str]:
     entrypoint above starts from exactly the environment the image ships -
     a default that changes in the Dockerfile changes what the test asserts on,
     instead of drifting away from a copy hard-coded here.
+
+    `${NAME}` references are resolved against the stage's own ARG defaults,
+    which is what Docker itself leaves in the image when a build passes no
+    `--build-arg`. Without that, a caller would be handed the literal string
+    `${WEBSITE_VERSION}` as the version this image ships - a value no image
+    ever has, and one an application would faithfully report.
     """
+    defaults = distribution_args()
+    return {
+        match["name"]: BUILD_ARG_REFERENCE.sub(
+            lambda reference: defaults[reference["name"]],
+            match["value"].strip('"'),
+        )
+        for match in re.finditer(
+            r"^ENV (?P<name>\w+)=(?P<value>.*)$", _distribution_stage(), re.MULTILINE
+        )
+    }
+
+
+def _distribution_stage() -> str:
+    """Return the Dockerfile text from the distribution stage's FROM onward."""
     _, marker, distribution = DOCKERFILE.read_text().partition(
         "FROM base AS distribution"
     )
     assert marker, "the distribution stage was renamed"
-    return {
-        match["name"]: match["value"].strip('"')
-        for match in re.finditer(
-            r"^ENV (?P<name>\w+)=(?P<value>.*)$", distribution, re.MULTILINE
-        )
-    }
+    return distribution
 
 
 def security_headers_app(application: RequestIDMiddleware) -> SecurityHeadersMiddleware:

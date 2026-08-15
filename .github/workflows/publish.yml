@@ -172,6 +172,18 @@ jobs:
           # added stage must not silently change what gets published.
           target: distribution
           platforms: linux/amd64,linux/arm64
+          # What the image reports at GET /version and on every span it
+          # exports. The version is metadata-action's, not github.ref_name:
+          # it is the same string the primary image tag above is built from,
+          # so what a deployment reports always matches the tag it was pulled
+          # as, with no `v` prefix to reconcile. It degrades to the branch name
+          # on a main push and `pr-<n>` on a pull request, which is exactly why
+          # the commit is sent too - those images are the ones whose version
+          # cannot identify them. Both end up in the image's environment, so
+          # neither may ever carry a secret.
+          build-args: |
+            WEBSITE_VERSION=${{ steps.meta.outputs.version }}
+            WEBSITE_COMMIT=${{ github.sha }}
           push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

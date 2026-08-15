@@ -246,6 +246,25 @@ USER app
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
   CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ['UVICORN_PORT'] + '/readyz', timeout=4)"
 
+# Which build this is. The only values in this stage that cannot be written
+# down here, because the source tree does not know them: the release version
+# lives in GitHub (pyproject.toml carries a placeholder, see its `version`
+# comment) and the image has no .git to read the commit out of.
+# .github/workflows/publish.yml passes both as --build-arg; a plain
+# `docker build` gets the defaults below, which say "not a release" out loud
+# rather than claiming a version nobody cut. Served at GET /version and
+# attached to every span and metric - see src/app/config.py.
+#
+# Last in the stage on purpose. These change on every commit, and everything
+# after the layer that consumes a build argument is rebuilt with it; below this
+# point there is only metadata, so a new version re-runs no installation, no
+# useradd and no COPY. Build arguments are readable in the image's history, so
+# only ever put facts here - never a credential.
+ARG WEBSITE_VERSION=0.0.0
+ARG WEBSITE_COMMIT=unknown
+ENV WEBSITE_VERSION=${WEBSITE_VERSION}
+ENV WEBSITE_COMMIT=${WEBSITE_COMMIT}
+
 # ENTRYPOINT rather than CMD, so `docker run <image> --root-path /shop` (or a
 # Kubernetes `args:`) appends Uvicorn flags; command-line values take
 # precedence over UVICORN_* environment values. Exec form makes Uvicorn PID 1

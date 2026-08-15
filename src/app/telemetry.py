@@ -12,7 +12,7 @@ from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExport
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+from opentelemetry.sdk.resources import SERVICE_NAME, SERVICE_VERSION, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import Span
@@ -40,6 +40,20 @@ REQUEST_ID_ATTRIBUTE = "request.id"
 SEMCONV_STABILITY_OPT_IN = "OTEL_SEMCONV_STABILITY_OPT_IN"
 STABLE_HTTP_SEMCONV = "http"
 
+# The commit a build was cut from, which `service.version` cannot carry on its
+# own: a rolling default-branch image reports its version as "main", so without
+# this every build of main is one indistinguishable series in the backend.
+# OpenTelemetry does spell this attribute - `vcs.ref.head.revision` - but only
+# at development stability, and the Python package exposes it from
+# `opentelemetry.semconv._incubating`, whose leading underscore is the
+# package's own statement that the import path is not stable. Writing the name
+# out keeps the wire format standard (which is the part a backend reads) while
+# leaving nothing that a rename inside a private module could break at boot.
+# Distinct from `service.version` rather than folded into it as semver build
+# metadata (1.2.3+abc1234), which would make every commit a new value of the
+# attribute dashboards group by.
+VCS_REVISION_ATTRIBUTE = "vcs.ref.head.revision"
+
 # What Resource.create() reports when nothing named the service. Telemetry
 # arriving under that name is the failure this app refuses to boot with:
 # unnamed spans and metrics cannot be dashboarded, alerted on or told apart
@@ -58,19 +72,22 @@ OTLP_PROTOCOL_VARIABLES = (
 )
 
 
-def create_providers() -> tuple[TracerProvider, MeterProvider]:
+def create_providers(settings: Settings) -> tuple[TracerProvider, MeterProvider]:
     """
     Build the SDK providers for both signals from the standard environment.
 
-    Nothing is read from ``Settings`` here on purpose. Endpoint, headers,
-    timeouts, compression, sampler, batch sizes and export intervals are all
-    specified by OpenTelemetry, and the SDK constructors below already read
-    them; restating any of them as a ``WEBSITE_*`` setting would invent a
+    Almost nothing is read from ``Settings`` here, on purpose. Endpoint,
+    headers, timeouts, compression, sampler, batch sizes and export intervals
+    are all specified by OpenTelemetry, and the SDK constructors below already
+    read them; restating any of them as a ``WEBSITE_*`` setting would invent a
     second vocabulary for values every operator, collector and vendor document
-    already spells the standard way. What this function owns is the two things
-    the environment cannot express: that both signals share one ``Resource``,
-    so a trace and the metrics beside it describe the same service, and that a
-    misconfiguration fails at boot instead of at the first dropped export.
+    already spells the standard way. What this function owns is the three
+    things the environment cannot express: that both signals share one
+    ``Resource``, so a trace and the metrics beside it describe the same
+    service; that a misconfiguration fails at boot instead of at the first
+    dropped export; and which build is running, which is the one fact the
+    deployment genuinely does not have - it is fixed when the image is built,
+    not when it is deployed.
 
     Both providers register an ``atexit`` flush of their own (the SDK's
     ``shutdown_on_exit`` default), which is why nothing in the lifespan drains
@@ -87,7 +104,19 @@ def create_providers() -> tuple[TracerProvider, MeterProvider]:
     # Reads OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES, so checking the
     # result covers both spellings of the same fact, plus anything a resource
     # detector contributed - which re-reading the variables here would not.
-    resource = Resource.create()
+    #
+    # The attributes passed here are merged last, so they beat the same keys in
+    # OTEL_RESOURCE_ATTRIBUTES while leaving every other attribute that
+    # variable set untouched. That is the precedence this wants: the image
+    # knows which build it is, and a deployment naming a different version
+    # would be reporting something false. Naming the service stays the
+    # deployment's job, and is still checked below.
+    resource = Resource.create(
+        {
+            SERVICE_VERSION: settings.version,
+            VCS_REVISION_ATTRIBUTE: settings.commit,
+        }
+    )
     if resource.attributes.get(SERVICE_NAME) == UNNAMED_SERVICE:
         raise ValueError(
             "OTEL_SERVICE_NAME must name this service when telemetry is"
@@ -124,7 +153,7 @@ def configure_telemetry(settings: Settings) -> None:
     """
     if not settings.telemetry_enabled:
         return
-    tracer_provider, meter_provider = create_providers()
+    tracer_provider, meter_provider = create_providers(settings)
     trace.set_tracer_provider(tracer_provider)
     metrics.set_meter_provider(meter_provider)
 

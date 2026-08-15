@@ -6,7 +6,11 @@ import urllib.request
 
 import pytest
 
-from app.routers.probes import HEALTH_PATH, LIVENESS_PATH, PROBE_PATHS
+from app.config import DEFAULT_COMMIT, DEFAULT_VERSION, Settings
+from app.factory import create_app
+from app.routers.probes import HEALTH_PATH, LIVENESS_PATH, PROBE_PATHS, VERSION_PATH
+
+from .helpers import drive_get
 
 
 @pytest.mark.parametrize("path", PROBE_PATHS)
@@ -79,6 +83,78 @@ def test_probe_reports_a_typed_status_in_the_schema(server: str, path: str) -> N
     reference = response["content"]["application/json"]["schema"]["$ref"]
     assert reference.endswith("/ProbeStatus")
     assert schema["components"]["schemas"]["ProbeStatus"]["required"] == ["status"]
+
+
+def test_version_reports_the_build_the_app_was_configured_with() -> None:
+    """
+    /version answers with this instance's build, not a constant.
+
+    Driven in process so the values under test are the ones a Settings carries,
+    which is the whole contract: the image bakes WEBSITE_VERSION and
+    WEBSITE_COMMIT into its environment (see .devcontainer/Dockerfile), config
+    reads them, and the closure in create_version_router is what puts them on
+    the wire. A route serving a module-level constant would pass every other
+    test in this file and report the same version from every image ever built.
+    """
+    application = create_app(Settings(version="1.2.3", commit="a" * 40))
+
+    response = drive_get(application, VERSION_PATH, host="localhost")
+
+    assert response.status == 200
+    assert json.loads(response.body) == {"version": "1.2.3", "commit": "a" * 40}
+
+
+def test_an_untagged_build_says_so_rather_than_claiming_a_version(server: str) -> None:
+    """
+    A build from no release reports the placeholder, not an empty or invented version.
+
+    This is what the suite's own server is - started from a source tree with no
+    WEBSITE_VERSION in its environment - and what a developer's `docker build`
+    produces. Reporting 0.0.0 is the honest answer, and it is a version no
+    release will ever carry, so nothing downstream can mistake it for one.
+    """
+    with urllib.request.urlopen(f"{server}{VERSION_PATH}", timeout=5) as resp:
+        assert resp.status == 200
+        assert json.load(resp) == {
+            "version": DEFAULT_VERSION,
+            "commit": DEFAULT_COMMIT,
+        }
+
+
+def test_version_is_not_a_probe(server: str) -> None:
+    """
+    /version stays out of PROBE_PATHS, which is what that tuple is exempt as.
+
+    Membership decides two unrelated things at once - the Host exemption and
+    what telemetry never records - and /version wants only the first (see
+    app.factory). Joining the tuple would silently drop it from every trace,
+    and would break the probe contract the tests above assert over the whole
+    tuple, since this route answers a different body.
+    """
+    assert VERSION_PATH not in PROBE_PATHS
+    assert not VERSION_PATH.startswith("/api")
+
+    with urllib.request.urlopen(f"{server}{VERSION_PATH}", timeout=5) as resp:
+        assert "status" not in json.load(resp)
+
+
+def test_version_reports_a_typed_body_in_the_schema(server: str) -> None:
+    """
+    The documented shape of /version names both of its fields.
+
+    Same reasoning as the probe schema test above: this endpoint's readers are
+    humans and deployment tooling, and the generated schema is where they find
+    out that `commit` is a full SHA rather than an abbreviation.
+    """
+    with urllib.request.urlopen(f"{server}/openapi.json", timeout=5) as resp:
+        schema = json.load(resp)
+    response = schema["paths"][VERSION_PATH]["get"]["responses"]["200"]
+    reference = response["content"]["application/json"]["schema"]["$ref"]
+    assert reference.endswith("/VersionInfo")
+    assert schema["components"]["schemas"]["VersionInfo"]["required"] == [
+        "version",
+        "commit",
+    ]
 
 
 def test_retired_health_route_is_gone(server: str) -> None:

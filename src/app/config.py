@@ -10,6 +10,15 @@ from .observability import LogFormat
 DEFAULT_MAX_BODY_BYTES = 1_000_000
 DEFAULT_TRUSTED_HOSTS = ("localhost", "127.0.0.1")
 
+# What a build that came from no release reports as its identity. Matches the
+# placeholder version in pyproject.toml on purpose: 0.0.0 is valid semver, so
+# anything parsing it keeps working, and it is a version no release will ever
+# carry - a deployment reporting it is telling the truth, that it is running
+# something nobody tagged (a local `uv run`, a `docker build` with no
+# --build-arg) rather than a release.
+DEFAULT_VERSION = "0.0.0"
+DEFAULT_COMMIT = "unknown"
+
 # Telemetry turns itself on when a collector is named, so there is no
 # WEBSITE_ENABLE_* flag beside these: an endpoint variable and a switch would
 # be two ways to say the same thing, and the deployment that set one and not
@@ -95,6 +104,17 @@ class Settings:
     # excluding one noisy path of its own would otherwise silently put the
     # probes back into every trace and every latency histogram.
     telemetry_excluded_urls: tuple[str, ...] = ()
+    # What this build *is*, rather than how it behaves - the only two settings
+    # here that describe the artifact instead of configuring it. They are baked
+    # into the distribution image at build time (see the ARGs at the end of
+    # .devcontainer/Dockerfile, fed by .github/workflows/publish.yml) because
+    # nothing in the source tree knows them: the release version lives in
+    # GitHub, pyproject.toml carries only a placeholder, and a built image has
+    # no .git directory to read the commit back out of. Served by GET /version
+    # and attached to every span and metric - see app.routers.probes and
+    # app.telemetry.
+    version: str = DEFAULT_VERSION
+    commit: str = DEFAULT_COMMIT
 
     def __post_init__(self) -> None:
         """Normalize human-entered values and reject unsafe configuration."""
@@ -111,6 +131,15 @@ class Settings:
         log_level = self.log_level.upper()
         if log_level not in logging.getLevelNamesMapping():
             raise ValueError(f"unknown log level: {self.log_level}")
+
+        # Empty is not a version, and it is the value that actually shows up:
+        # `docker build --build-arg WEBSITE_VERSION=` sets the variable to the
+        # empty string rather than leaving the ARG default in place, so a
+        # workflow whose expression resolved to nothing would otherwise ship an
+        # image reporting "" as what is deployed. Fall back to the placeholder,
+        # which says "not a release" out loud.
+        object.__setattr__(self, "version", self.version.strip() or DEFAULT_VERSION)
+        object.__setattr__(self, "commit", self.commit.strip() or DEFAULT_COMMIT)
 
         object.__setattr__(self, "trusted_hosts", trusted_hosts)
         object.__setattr__(self, "log_level", log_level)
@@ -185,4 +214,11 @@ class Settings:
                 )
                 if (pattern := raw_pattern.strip())
             ),
+            # WEBSITE_*, like every other setting this app defines itself. The
+            # standard-looking alternatives are all taken: OTEL_* belongs to
+            # OpenTelemetry, and a bare VERSION or COMMIT in a container's
+            # environment is the kind of name a base image or an orchestrator
+            # sets for its own reasons.
+            version=values.get("WEBSITE_VERSION", DEFAULT_VERSION),
+            commit=values.get("WEBSITE_COMMIT", DEFAULT_COMMIT),
         )

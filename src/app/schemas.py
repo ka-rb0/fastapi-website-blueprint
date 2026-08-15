@@ -19,6 +19,26 @@ class ProbeStatus(BaseModel):
     status: str
 
 
+class VersionInfo(BaseModel):
+    """
+    Reply returned by ``GET /version`` in ``app.routers.probes``.
+
+    Two fields because one does not answer the question on every build. The
+    release tag is what a human asks for and what a changelog is written
+    against, but a rolling default-branch image reports its version as the
+    branch name - so the commit is what makes "which build is this?" answerable
+    for the images most likely to be running when somebody needs to know. Both
+    are unabbreviated: the full SHA pastes straight into ``git show``.
+
+    Mirrors the two fields the Kubernetes API server puts at its own
+    ``/version`` (``gitVersion``, ``gitCommit``), under names that do not
+    presume the VCS.
+    """
+
+    version: str
+    commit: str
+
+
 class ShoutPayload(BaseModel):
     """Body accepted by ``POST /api/shout``."""
 

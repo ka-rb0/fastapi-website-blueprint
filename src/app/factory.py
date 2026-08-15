@@ -12,7 +12,14 @@ from .middleware import (
     RequestIDMiddleware,
     SecurityHeadersMiddleware,
 )
-from .routers import PROBE_PATHS, api_router, create_pages_router, probes_router
+from .routers import (
+    PROBE_PATHS,
+    VERSION_PATH,
+    api_router,
+    create_pages_router,
+    create_version_router,
+    probes_router,
+)
 from .telemetry import instrument_app
 from .templating import STATIC_DIR, create_templates
 
@@ -45,15 +52,21 @@ def create_app(settings: Settings) -> RequestIDMiddleware:
 
     # The probe routes are exempt: an orchestrator probes a pod by its own IP,
     # which no allowlist can name in advance (see HostValidationMiddleware and
-    # "Trusted hosts" in docs/ARCHITECTURE.md).
+    # "Trusted hosts" in docs/ARCHITECTURE.md). /version joins them because a
+    # rollout check is aimed at an instance the same way, and for no other
+    # reason - it is the one exemption that is not a probe, which is why this
+    # list is spelled out here rather than being PROBE_PATHS again.
     fastapi_app.add_middleware(
         HostValidationMiddleware,
         allowed_hosts=settings.trusted_hosts,
-        exempt_paths=PROBE_PATHS,
+        exempt_paths=(*PROBE_PATHS, VERSION_PATH),
     )
     fastapi_app.include_router(create_pages_router(templates))
     fastapi_app.include_router(api_router)
     fastapi_app.include_router(probes_router)
+    fastapi_app.include_router(
+        create_version_router(version=settings.version, commit=settings.commit)
+    )
     register_exception_handlers(fastapi_app, templates)
 
     # Mount assets last so application routes always take precedence. No
@@ -68,6 +81,10 @@ def create_app(settings: Settings) -> RequestIDMiddleware:
     # entirely when no collector is configured, so the default deployment
     # carries no instrumentation at all - see "Telemetry" in
     # docs/ARCHITECTURE.md.
+    # PROBE_PATHS alone, not the wider list handed to the Host allowlist above:
+    # what makes the probes not worth tracing is that every orchestrator, load
+    # balancer and container runtime in front of the deployment polls them
+    # every few seconds, which is not true of /version.
     if settings.telemetry_enabled:
         instrument_app(
             fastapi_app,

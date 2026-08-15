@@ -45,10 +45,11 @@ image; no second command is needed.
   default covers local development, and the dev container adds
   `proxy.localhost` for the Caddy topology; a production deployment must set
   `WEBSITE_TRUSTED_HOSTS` to its public host name(s). The probe routes
-  (`/livez`, `/readyz`, `/healthz`) are the only ones exempt from the check,
-  so container healthchecks and Kubernetes probes - which address the pod by
-  an IP no allowlist could name - keep working whatever you set (see
-  "Trusted hosts" in [ARCHITECTURE.md](ARCHITECTURE.md)). Testing from a phone on your
+  (`/livez`, `/readyz`, `/healthz`) and `/version` are the only ones exempt
+  from the check, so container healthchecks, Kubernetes probes and rollout
+  checks - which address the pod by an IP no allowlist could name - keep
+  working whatever you set (see "Trusted hosts" in
+  [ARCHITECTURE.md](ARCHITECTURE.md)). Testing from a phone on your
   LAN? The phone addresses the site by this machine's LAN IP, so add that
   IP - not the phone's - or use `"*"` while developing (see
   `.devcontainer/.env.example`).

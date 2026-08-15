@@ -18,7 +18,7 @@ import urllib.request
 import pytest
 
 from app.middleware import SECURITY_HEADERS
-from app.routers import PROBE_PATHS
+from app.routers import PROBE_PATHS, VERSION_PATH
 from app.routers.probes import LIVENESS_PATH
 
 from .helpers import emitted_urls
@@ -163,7 +163,27 @@ def test_probe_exemption_survives_a_root_path(prefixed_server: str, path: str) -
         assert resp.status == 200
 
 
-@pytest.mark.parametrize("path", ["/", "/api/shout", f"{LIVENESS_PATH}/"])
+def test_version_answers_a_host_the_allowlist_cannot_name(
+    trusted_hosts_server: str,
+) -> None:
+    """
+    /version is exempt too, and for the same reason the probes are.
+
+    The question it answers - which build is on this instance - is asked of an
+    instance, by a rollout check addressing a container or pod directly. Behind
+    the allowlist the answer would be a 400 from whatever address a scheduler
+    happened to assign, which is the whole failure mode the exemption exists
+    for. It reflects nothing of the request back, so it can be exempt.
+    """
+    request = _get_with_host(f"{trusted_hosts_server}{VERSION_PATH}", PROBE_HOST)
+    with urllib.request.urlopen(request, timeout=5) as resp:
+        assert resp.status == 200
+        assert set(json.loads(resp.read())) == {"version", "commit"}
+
+
+@pytest.mark.parametrize(
+    "path", ["/", "/api/shout", f"{LIVENESS_PATH}/", f"{VERSION_PATH}/"]
+)
 def test_the_exemption_reaches_no_further_than_the_probe_routes(
     trusted_hosts_server: str, path: str
 ) -> None:

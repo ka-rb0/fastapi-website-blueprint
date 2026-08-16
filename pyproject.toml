@@ -53,7 +53,7 @@ dev = [
   # Property-based testing for the two hand-written parsers that read
   # attacker-controlled bytes - see the fuzzing note in docs/GITHUB_SETUP.md
   # for why this, rather than a fuzzing harness, is the right size of tool.
-  "hypothesis>=6.165.2",
+  "hypothesis>=6.165.5",
   "mypy>=2.2.0",
   "playwright>=1.61.0",
   "pytest>=9.1.1",

@@ -72,6 +72,6 @@ jobs:
           # add: repo_token: ${{ secrets.SCORECARD_TOKEN }}
       # Publishes the findings as code scanning alerts. Same action version as
       # codeql.yml uses - keep the two SHAs in step when Dependabot bumps them.
-      - uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+      - uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
         with:
           sarif_file: results.sarif

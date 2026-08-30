@@ -126,7 +126,7 @@ jobs:
       # container driver, which the Dockerfile's `# syntax=` frontend, its
       # `--mount=type=bind` lockfile mounts and multi-platform output need a
       # current BuildKit for.
-      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       # Only publishing runs authenticate. GITHUB_TOKEN's packages:write scope
       # is enough to push to the repo's own namespace - no PAT, no secret to
       # rotate.
@@ -237,7 +237,7 @@ jobs:
       # which outlives the 90-day cap on workflow artifacts.
       - name: Generate the SBOM
         if: github.event_name == 'push'
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@aa80c8c5bd439a416a62804f2151ab38c671a638 # v0.24.1
         with:
           image: ${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }}
           format: spdx-json
